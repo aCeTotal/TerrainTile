@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TerrainTile</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <h1>TerrainTile</h1>
+  </div>
+  <nav class="tabs">
+    <button id="tab-pipeline" class="tab active">Pipeline</button>
+    <button id="tab-viewer" class="tab">3D-visning</button>
+  </nav>
+  <div id="run-pill" class="pill idle">Inaktiv</div>
+</header>
+
+<!-- ======================= PIPELINE ======================= -->
+<main id="view-pipeline" class="pipeline">
+
+  <div class="col config">
+
+    <section class="card">
+      <h2>Import</h2>
+      <div class="row">
+        <button id="pick-input" class="btn">Velg høydedata…</button>
+      </div>
+      <div id="input-list" class="path-list muted">Ingen høydedata valgt.</div>
+      <p class="hint">Mapper, .tif/.tiff-filer eller ZIP fra hoydedata.no — ZIP pakkes ut automatisk.</p>
+      <div id="scan-info" class="info-box hidden"></div>
+      <div id="scan-error" class="error-box hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Fliser</h2>
+      <label class="field">
+        <span>Flisstørrelse</span>
+        <select id="tile-size">
+          <option value="256">256 m</option>
+          <option value="512" selected>512 m</option>
+          <option value="1024">1024 m</option>
+          <option value="2048">2048 m</option>
+        </select>
+      </label>
+      <label class="field check">
+        <input type="checkbox" id="overlap" checked>
+        <span>Delte kantvertekser (anbefalt)</span>
+      </label>
+      <label class="field">
+        <span>LOD-nivåer: <b id="lods-val">6</b></span>
+        <input type="range" id="lods" min="1" max="8" value="6">
+      </label>
+      <label class="field">
+        <span>Tråder (0 = alle): <b id="threads-val">0</b></span>
+        <input type="range" id="threads" min="0" max="64" value="0">
+      </label>
+      <label class="field">
+        <span>Nodata-høyde (hav, m)</span>
+        <input type="number" id="nodata" value="0" step="1">
+      </label>
+      <label class="field check">
+        <input type="checkbox" id="force">
+        <span>Tving full rebuild (ellers bygges kun endringer)</span>
+      </label>
+      <div id="grid-info" class="hint"></div>
+    </section>
+
+    <section class="card">
+      <h2>Ortofoto</h2>
+      <label class="field check">
+        <input type="checkbox" id="use-ortho" checked>
+        <span>Hent ortofoto fra nettet</span>
+      </label>
+      <div id="ortho-config">
+        <label class="field check"><input type="radio" name="ortho-kind" value="nib" checked><span>Norge i bilder (GeoID-innlogging)</span></label>
+        <label class="field check"><input type="radio" name="ortho-kind" value="wms"><span>WMS med BAAT-ticket</span></label>
+        <label class="field check"><input type="radio" name="ortho-kind" value="xyz"><span>XYZ tile-server</span></label>
+        <div id="ortho-nib" class="ortho-fields">
+          <label class="field"><span>GeoID-brukernavn</span><input type="text" id="nib-user" autocomplete="off"></label>
+          <label class="field"><span>GeoID-passord</span><input type="password" id="nib-pass"></label>
+          <p class="hint">Token hentes og fornyes automatisk. Gratis konto: geoid.no</p>
+        </div>
+        <div id="ortho-wms" class="ortho-fields hidden">
+          <label class="field"><span>WMS-URL med LAYERS og ticket</span><input type="text" id="wms-url"></label>
+          <p class="hint">Hele request-URL-er fra nettleseren kan limes inn direkte.</p>
+        </div>
+        <div id="ortho-xyz" class="ortho-fields hidden">
+          <label class="field"><span>XYZ URL-mal ({z}/{x}/{y})</span><input type="text" id="xyz-url"></label>
+          <label class="field"><span>Zoom: <b id="zoom-val">17</b></span><input type="range" id="zoom" min="12" max="19" value="17"></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Masker (DTM-terskler)</h2>
+      <div id="mask-sliders"></div>
+    </section>
+
+    <section class="card">
+      <h2>Eksport</h2>
+      <div class="row">
+        <button id="pick-output" class="btn">Velg utmappe…</button>
+      </div>
+      <div id="output-path" class="path-list muted">Ingen utmappe valgt.</div>
+      <div class="row run-row">
+        <button id="start" class="btn primary" disabled>Start prosessering</button>
+        <button id="cancel" class="btn danger hidden">Avbryt</button>
+      </div>
+      <p id="start-hint" class="hint">Velg høydedata og utmappe først.</p>
+    </section>
+
+  </div>
+
+  <div class="col progress">
+    <section class="card grow">
+      <h2>Fremdrift</h2>
+      <div id="status" class="status">Kobler til…</div>
+      <div class="progress-wrap">
+        <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+        <div class="progress-meta">
+          <span id="progress-count"></span>
+          <span id="progress-rate"></span>
+          <span id="progress-eta"></span>
+        </div>
+      </div>
+      <div id="report" class="hidden"></div>
+      <div class="row">
+        <button id="open-viewer" class="btn primary hidden">Åpne 3D-visning →</button>
+      </div>
+      <h3>Logg</h3>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+
+</main>
+
+<!-- ======================= 3D VIEWER ======================= -->
+<main id="view-viewer" class="viewer hidden">
+  <canvas id="gl"></canvas>
+  <div id="viewer-empty" class="viewer-msg">
+    <h2>Ingen datasett ennå</h2>
+    <p>Kjør pipelinen ferdig, så kan du fly rundt i terrenget her.</p>
+  </div>
+  <div id="viewer-hud" class="hud hidden">
+    <div class="hud-box">
+      <div id="hud-pos">–</div>
+      <div id="hud-tiles">–</div>
+      <div id="hud-speed">–</div>
+    </div>
+    <div class="hud-box hud-controls">
+      <label>Detaljavstand <b id="dist-val">2.5 km</b>
+        <input type="range" id="view-dist" min="500" max="8000" step="250" value="2500">
+      </label>
+    </div>
+    <div id="hud-help" class="hud-box hud-help">
+      Klikk for å fly &nbsp;•&nbsp; <b>WASD</b> beveg &nbsp;•&nbsp; <b>Q/E</b> ned/opp
+      &nbsp;•&nbsp; <b>Shift</b> fort &nbsp;•&nbsp; <b>hjul</b> fart &nbsp;•&nbsp; <b>Esc</b> slipp
+    </div>
+  </div>
+</main>
+
+<!-- ======================= FILE BROWSER MODAL ======================= -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="modal-title">Velg</h2>
+      <button id="modal-close" class="btn small">✕</button>
+    </div>
+    <div class="modal-path-row">
+      <button id="modal-up" class="btn small">↑ Opp</button>
+      <input type="text" id="modal-path" spellcheck="false">
+    </div>
+    <div id="modal-list" class="modal-list"></div>
+    <div class="modal-foot">
+      <span id="modal-selection" class="hint"></span>
+      <button id="modal-choose" class="btn primary">Velg</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
