@@ -37,7 +37,7 @@ function loadTextures() {
   for (const [key, [file, srgb]] of Object.entries(MATERIALS)) {
     const t = loader.load(`/materials/${file}`);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 8;
+    t.anisotropy = 4;
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     textures[key] = t;
   }
@@ -181,9 +181,10 @@ export function createTerrainMaterial() {
            vec2 uRy = vWPos.xz * 0.1;
            vec2 uRz = vWPos.xy * 0.1;
 
-           float dA = stex(uGAd, uvG, wG, g1, g2, g3, gdx, gdy).r;
-           float dB = stex(uGBd, uvG, wG, g1, g2, g3, gdx, gdy).r;
-           float dR = tri(uRd, uRx, uRy, uRz, twr).r;
+           // Displacement only steers blend weights — plain taps suffice.
+           float dA = texture(uGAd, uvG).r;
+           float dB = texture(uGBd, uvG).r;
+           float dR = texture(uRd, uRy).r;
 
            // Ground A/B: noise patches, displacement sharpens the border.
            float gmix = tnoise(vWPos.xz * 0.02) * 0.65 + tnoise(vWPos.xz * 0.0045) * 0.35;

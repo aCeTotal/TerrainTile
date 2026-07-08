@@ -176,18 +176,35 @@ function loadSky() {
 const quality = { level: 1.0, frames: 0, time: 0 };
 
 function adaptQuality(dt) {
-  if (dt > 0.25) return; // tab was hidden; not a real frame time
+  if (dt > 1.0) return; // tab was hidden; not a real frame time
   quality.frames++;
-  quality.time += dt;
-  if (quality.frames < 45) return;
+  quality.time += Math.min(dt, 0.25);
+  if (quality.frames < 30) return;
   const avg = quality.time / quality.frames;
   quality.frames = 0;
   quality.time = 0;
-  if (avg > 0.0175) quality.level = Math.max(0.25, quality.level - 0.15);
+  // Panic drop when far below 60, gentle recovery when clearly above.
+  if (avg > 0.0175) quality.level = Math.max(0.2, quality.level - (avg > 0.033 ? 0.3 : 0.15));
   else if (avg < 0.014) quality.level = Math.min(1.0, quality.level + 0.05);
   else return;
-  near.setQuality(Math.round(40 + 160 * quality.level), 1 + 2 * quality.level);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, quality.level < 0.4 ? 1 : 2));
+  applyQuality();
+}
+
+function applyQuality() {
+  const q = quality.level;
+  near.setQuality(Math.round(40 + 160 * q), 1 + 2 * q);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, q < 0.4 ? 1 : q < 0.65 ? 1.5 : 2));
+  // Shadows are the other half of the frame budget: shrink, then drop.
+  const wantShadows = q >= 0.45;
+  if (sun.castShadow !== wantShadows) sun.castShadow = wantShadows;
+  const size = q < 0.7 ? 2048 : 4096;
+  if (sun.shadow.mapSize.x !== size) {
+    sun.shadow.mapSize.set(size, size);
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose();
+      sun.shadow.map = null;
+    }
+  }
 }
 
 // Keep the shadow volume centered on the camera. The anchor snaps to a

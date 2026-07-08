@@ -161,6 +161,9 @@ export function update(camera, nearDist) {
       entry = { mesh: null, lod: -1, loading: false, texture: undefined, failed: false, fails: 0 };
       tiles.set(key, entry);
     }
+    // Only nearby tiles render into the shadow map — distant ones cost a
+    // full extra geometry pass without contributing visible shadows.
+    if (entry.mesh) entry.mesh.castShadow = dist < 1200;
     if (entry.failed && performance.now() >= entry.retryAt) entry.failed = false;
     if (entry.failed || entry.loading || inFlight >= MAX_INFLIGHT) continue;
     const want = wantLod(entry, dist);
