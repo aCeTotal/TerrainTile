@@ -12,7 +12,11 @@ use crate::server::state::SharedState;
 /// The whole-terrain layer targets roughly this many vertices in total; the
 /// per-tile grid is subsampled further until it fits, so even huge datasets
 /// render as one cheap mesh.
-const TARGET_VERTS: usize = 2_000_000;
+const TARGET_VERTS: usize = 4_000_000;
+
+/// Cache file name; versioned so a budget/format change ignores stale
+/// caches instead of serving them until the next pipeline run.
+const CACHE_NAME: &str = "far_v2.bin";
 
 /// GET /data/far.bin — every tile's coarsest mesh concatenated into one
 /// compact stream so the viewer can show the entire terrain with a single
@@ -31,7 +35,7 @@ const TARGET_VERTS: usize = 2_000_000;
 pub async fn far_bin(State(state): State<SharedState>) -> Result<Response, StatusCode> {
     let root = state.output().ok_or(StatusCode::NOT_FOUND)?;
     let _guard = state.far_lock.lock().await;
-    let cache = root.join("cache").join("far.bin");
+    let cache = root.join("cache").join(CACHE_NAME);
     if !fresh(&cache, &root.join("dataset.json")) {
         let root2 = root.clone();
         tokio::task::spawn_blocking(move || build(&root2))
@@ -140,7 +144,8 @@ fn build(root: &Path) -> Result<()> {
     let cache_dir = root.join("cache");
     std::fs::create_dir_all(&cache_dir)?;
     let tmp = cache_dir.join("far.bin.tmp");
+    let _ = std::fs::remove_file(cache_dir.join("far.bin")); // pre-versioning cache
     std::fs::write(&tmp, &out)?;
-    std::fs::rename(tmp, cache_dir.join("far.bin"))?;
+    std::fs::rename(tmp, cache_dir.join(CACHE_NAME))?;
     Ok(())
 }

@@ -7,7 +7,15 @@ import { parseTtm } from './ttm.js';
 import { createTerrainMaterial } from './terrain-material.js';
 
 const MAX_INFLIGHT = 6;
-const MAX_TILES = 200;
+
+// Adjusted by the viewer's adaptive-quality controller (60 fps target).
+let maxTiles = 200;
+let lodScale = 3;
+
+export function setQuality(tiles, scale) {
+  maxTiles = tiles;
+  lodScale = scale;
+}
 
 let scene = null;
 let dataset = null;
@@ -39,10 +47,11 @@ function tileUrl(x, y, file) {
 }
 
 function desiredLod(dist) {
-  // Full resolution out to ~3 tiles from the camera; each LOD covers 2x
-  // the distance beyond that.
-  const t = dataset.tile_size_m * 3;
-  const lod = Math.round(Math.log2(Math.max(dist, t) / t));
+  const t = dataset.tile_size_m;
+  // The closest ring is always full resolution, whatever the quality level.
+  if (dist < 2 * t) return 0;
+  const base = t * lodScale;
+  const lod = Math.round(Math.log2(Math.max(dist, base) / base));
   return Math.max(0, Math.min(dataset.lods - 1, lod));
 }
 
@@ -100,7 +109,10 @@ async function loadLod(entry, x, y, lod) {
     setCovered(x, y, true);
   } catch (err) {
     console.warn(`tile_x${x}_y${y} lod${lod}:`, err);
+    // Retry with backoff — a tile that failed once (server restart, resume
+    // in progress) must not stay a hole for the rest of the session.
     entry.failed = true;
+    entry.retryAt = performance.now() + Math.min(60000, 5000 * ++entry.fails);
   } finally {
     entry.loading = false;
     inFlight--;
@@ -138,7 +150,7 @@ export function update(camera, nearDist) {
     }
   }
   wanted.sort((a, b) => a[0] - b[0]);
-  if (wanted.length > MAX_TILES) wanted.length = MAX_TILES;
+  if (wanted.length > maxTiles) wanted.length = maxTiles;
 
   const keep = new Set();
   for (const [dist, x, y] of wanted) {
@@ -146,9 +158,10 @@ export function update(camera, nearDist) {
     keep.add(key);
     let entry = tiles.get(key);
     if (!entry) {
-      entry = { mesh: null, lod: -1, loading: false, texture: undefined, failed: false };
+      entry = { mesh: null, lod: -1, loading: false, texture: undefined, failed: false, fails: 0 };
       tiles.set(key, entry);
     }
+    if (entry.failed && performance.now() >= entry.retryAt) entry.failed = false;
     if (entry.failed || entry.loading || inFlight >= MAX_INFLIGHT) continue;
     const want = wantLod(entry, dist);
     if (want !== entry.lod) loadLod(entry, x, y, want);

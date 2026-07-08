@@ -46,6 +46,10 @@ pub struct TileMeta {
     pub masks: BTreeMap<String, String>,
     pub textures: BTreeMap<String, String>,
     pub had_nodata: bool,
+    /// Nodata-fill algorithm version the tile was built with; tiles with
+    /// `had_nodata` and an older version are rebuilt (see import::fill).
+    #[serde(default)]
+    pub fill_version: u32,
     /// Build fingerprints for incremental rebuilds; empty in old datasets,
     /// which simply forces a rebuild once.
     #[serde(default)]

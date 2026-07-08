@@ -75,8 +75,13 @@ fn run_inner(
         Err(e) => return Err(e),
     };
 
+    let _ = tx.send(Progress::Stage("Fyller innelukkede datahull (nodata) i kildene".into()));
+    let mosaic_files = crate::import::fill::fill_all(&source_files, &cfg.output, |m| {
+        let _ = tx.send(Progress::Stage(m));
+    })?;
+
     let _ = tx.send(Progress::Stage("Skanner høydedata (CRS, oppløsning, grid)".into()));
-    let info = &crate::import::dataset::scan(&source_files)?;
+    let info = &crate::import::dataset::scan(&mosaic_files)?;
 
     let _ = tx.send(Progress::Stage("Bygger mosaikk (VRT)".into()));
     let vrt_path = cfg.output.join("mosaic.vrt");
@@ -88,12 +93,12 @@ fn run_inner(
 
     // Incremental: a tile is rebuilt only if the fingerprints of what its
     // outputs were built from no longer match the current configuration.
-    let hashes = crate::pipeline::hash::compute(cfg, info);
+    let hashes = crate::pipeline::hash::compute(cfg, info, &source_files);
     let pending: Vec<TileId> = all
         .iter()
         .copied()
         .filter(|t| cfg.force || read_meta(&tiles_dir, *t).map_or(true, |m| {
-            m.mesh_hash != hashes.mesh || m.masks_hash != hashes.masks
+            m.mesh_hash != hashes.mesh || m.masks_hash != hashes.masks || stale_fill(&m)
         }))
         .collect();
     let skipped = total - pending.len();
@@ -237,6 +242,12 @@ fn read_meta(tiles_dir: &Path, t: TileId) -> Option<TileMeta> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Built with nodata before the current fill algorithm — its heights may
+/// contain crater artifacts and must be regenerated.
+fn stale_fill(m: &TileMeta) -> bool {
+    m.had_nodata && m.fill_version < crate::import::fill::FILL_VERSION
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_tile(
     cfg: &PipelineConfig,
@@ -256,8 +267,9 @@ fn process_tile(
     // Partial rebuild: meshes and masks have separate fingerprints, so a
     // changed mask threshold regenerates masks without touching meshes.
     let old = if cfg.force { None } else { read_meta(tiles_dir, t) };
-    let need_mesh = old.as_ref().is_none_or(|m| m.mesh_hash != hashes.mesh);
-    let need_masks = old.as_ref().is_none_or(|m| m.masks_hash != hashes.masks);
+    let refill = old.as_ref().is_some_and(stale_fill);
+    let need_mesh = old.as_ref().is_none_or(|m| m.mesh_hash != hashes.mesh) || refill;
+    let need_masks = old.as_ref().is_none_or(|m| m.masks_hash != hashes.masks) || refill;
 
     let n = grid.tile_px;
     let apron = 1usize << (cfg.lods - 1);
@@ -272,7 +284,10 @@ fn process_tile(
         r.as_ref().unwrap().read(opx - apron as i64, opy - apron as i64, size, size)
     })?;
     if had_nodata {
-        let _ = tx.send(Progress::Warn(format!("{}: nodata fylt fra nabopiksler", t.name())));
+        let _ = tx.send(Progress::Warn(format!(
+            "{}: nodata (hav/kant) fylt med nodata-høyde",
+            t.name()
+        )));
     }
     let patch = HeightPatch { data, n, apron };
     let stats = mesh::stats(&patch, grid.resolution);
@@ -369,6 +384,7 @@ fn process_tile(
         masks: mask_files,
         textures,
         had_nodata,
+        fill_version: crate::import::fill::FILL_VERSION,
         mesh_hash: hashes.mesh.clone(),
         masks_hash: hashes.masks.clone(),
     };

@@ -16,11 +16,12 @@ pub struct BuildHashes {
     pub masks: String,
 }
 
-pub fn compute(cfg: &PipelineConfig, info: &DatasetInfo) -> BuildHashes {
-    // Source fingerprint: name + size of every input raster. A re-download
-    // or added file changes this and rebuilds affected everything.
+pub fn compute(cfg: &PipelineConfig, info: &DatasetInfo, files: &[std::path::PathBuf]) -> BuildHashes {
+    // Source fingerprint: name + size of every ORIGINAL input raster (not
+    // the nodata-filled copies — their fill is versioned per tile instead,
+    // so a fill-algorithm change rebuilds only tiles that had nodata).
     let mut src = String::new();
-    for f in &info.files {
+    for f in files {
         let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("?");
         let len = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
         src.push_str(&format!("{name}:{len};"));

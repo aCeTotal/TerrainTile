@@ -3,6 +3,7 @@
 // Fly camera with pointer lock.
 
 import * as THREE from 'three';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import * as far from './far.js';
 import * as near from './near.js';
 
@@ -69,7 +70,8 @@ function updateHud() {
   const farTxt = f.total > 0 && f.loaded < f.total
     ? `  •  oversikt ${Math.round((100 * f.loaded) / f.total)} %`
     : '';
-  $('hud-tiles').textContent = `${s.meshes} detaljfliser (${s.inFlight} lastes)${farTxt}`;
+  $('hud-tiles').textContent =
+    `${s.meshes} detaljfliser (${s.inFlight} lastes)  •  kvalitet ${Math.round(quality.level * 100)} %${farTxt}`;
   $('hud-speed').textContent = `Fart ${speed.toFixed(0)} m/s`;
 }
 
@@ -102,7 +104,7 @@ async function init() {
   camera.position.set(w / 2, (dataset.max_height || 100) + above, h / 2);
   scene.fog = new THREE.Fog(SKY, diag * 0.8, Math.max(30000, diag * 1.4));
 
-  scene.add(new THREE.HemisphereLight(0xcfe5ff, 0x3a3f33, 0.6));
+  loadSky();
   sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
@@ -140,6 +142,54 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+/* ---------- sky ---------- */
+
+// HDRI with real clouds, used both as backdrop and as image-based ambient
+// light (scene.environment) — sky-blue from above, warm from the sun side.
+// Falls back to a hemisphere light if the download fails (offline).
+const HDRI_URL =
+  'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr';
+
+function loadSky() {
+  const fallback = new THREE.HemisphereLight(0xcfe5ff, 0x3a3f33, 0.6);
+  scene.add(fallback);
+  new RGBELoader().load(
+    HDRI_URL,
+    (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      scene.background = tex;
+      scene.environment = tex;
+      scene.environmentIntensity = 0.8;
+      scene.backgroundIntensity = 1.0;
+      scene.remove(fallback);
+    },
+    undefined,
+    () => console.warn('HDRI utilgjengelig — bruker enkel himmel'),
+  );
+}
+
+/* ---------- adaptive quality: guarantee 60 fps ---------- */
+
+// Rolling frame-time average steers tile budget, LOD falloff and pixel
+// ratio. Down fast when below 60 fps, up slowly when there is headroom.
+// The closest tile ring stays at LOD0 no matter what (see near.js).
+const quality = { level: 1.0, frames: 0, time: 0 };
+
+function adaptQuality(dt) {
+  if (dt > 0.25) return; // tab was hidden; not a real frame time
+  quality.frames++;
+  quality.time += dt;
+  if (quality.frames < 45) return;
+  const avg = quality.time / quality.frames;
+  quality.frames = 0;
+  quality.time = 0;
+  if (avg > 0.0175) quality.level = Math.max(0.25, quality.level - 0.15);
+  else if (avg < 0.014) quality.level = Math.min(1.0, quality.level + 0.05);
+  else return;
+  near.setQuality(Math.round(40 + 160 * quality.level), 1 + 2 * quality.level);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, quality.level < 0.4 ? 1 : 2));
+}
+
 // Keep the shadow volume centered on the camera. The anchor snaps to a
 // 2 m grid so the shadow map doesn't shimmer as the camera glides.
 const SUN_DIR = new THREE.Vector3(0.5, 0.75, -0.55).normalize();
@@ -162,6 +212,7 @@ function frame(now) {
   const dt = Math.min((now - lastFrame) / 1000, 0.1);
   lastFrame = now;
   moveCamera(dt);
+  adaptQuality(dt);
   updateSun();
   renderer.render(scene, camera);
 }

@@ -18,6 +18,7 @@ pub async fn serve(host: String, port: u16) -> anyhow::Result<()> {
         .route("/", get(assets::index))
         .route("/style.css", get(assets::style))
         .route("/js/{name}", get(assets::js))
+        .route("/materials/{name}", get(assets::material))
         .route("/api/status", get(api::status))
         .route("/api/browse", get(api::browse))
         .route("/api/scan", post(api::scan))
