@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { gridIndices, parseFarHeader } from './ttm.js';
-import { createTerrainMaterial } from './terrain-material.js';
+import { createSimpleTerrainMaterial } from './terrain-simple.js';
 
 let batched = null;
 let material = null;
@@ -21,7 +21,7 @@ export function progress() {
 
 export async function init(scene, ds, isTileCovered) {
   dataset = ds;
-  material = createTerrainMaterial();
+  material = createSimpleTerrainMaterial();
 
   const res = await fetch('/data/far.bin');
   if (!res.ok) {

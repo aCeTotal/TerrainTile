@@ -49,6 +49,7 @@ pub async fn js(Path(name): Path<String>) -> Result<Response, StatusCode> {
         "far.js" => include_str!("../../web/far.js"),
         "ttm.js" => include_str!("../../web/ttm.js"),
         "terrain-material.js" => include_str!("../../web/terrain-material.js"),
+        "terrain-simple.js" => include_str!("../../web/terrain-simple.js"),
         _ => return Err(StatusCode::NOT_FOUND),
     };
     Ok(([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], body).into_response())

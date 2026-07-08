@@ -5,22 +5,16 @@
 import * as THREE from 'three';
 import { parseTtm } from './ttm.js';
 import { createTerrainMaterial } from './terrain-material.js';
+import { createSimpleTerrainMaterial } from './terrain-simple.js';
 
 const MAX_INFLIGHT = 6;
-
-// Adjusted by the viewer's adaptive-quality controller (60 fps target).
-let maxTiles = 200;
-let lodScale = 3;
-
-export function setQuality(tiles, scale) {
-  maxTiles = tiles;
-  lodScale = scale;
-}
+const MAX_TILES = 200;
 
 let scene = null;
 let dataset = null;
 let setCovered = null; // far.setTileCovered
-let terrainMat = null; // shared by every untextured tile
+let richMat = null; // full PBR textures — ONLY the tile under the camera
+let cheapMat = null; // procedural ramp — everything else
 let inFlight = 0;
 const tiles = new Map(); // "x,y" -> entry
 const covered = new Set(); // keys with a visible near mesh
@@ -29,7 +23,8 @@ export function init(sc, ds, setTileCovered) {
   scene = sc;
   dataset = ds;
   setCovered = setTileCovered;
-  terrainMat = createTerrainMaterial();
+  richMat = createTerrainMaterial();
+  cheapMat = createSimpleTerrainMaterial();
 }
 
 export function isCovered(x, y) {
@@ -46,21 +41,23 @@ function tileUrl(x, y, file) {
   return `/data/tiles/tile_x${x}_y${y}/${file}`;
 }
 
-function desiredLod(dist) {
+// Exactly ONE tile — the one closest to the camera — gets LOD0 and the
+// full PBR material. Everything else is cheap: coarse LOD by distance,
+// correct silhouette, procedural colors.
+function desiredLod(dist, hero) {
+  if (hero) return 0;
   const t = dataset.tile_size_m;
-  // The closest ring is always full resolution, whatever the quality level.
-  if (dist < 2 * t) return 0;
-  const base = t * lodScale;
-  const lod = Math.round(Math.log2(Math.max(dist, base) / base));
-  return Math.max(0, Math.min(dataset.lods - 1, lod));
+  const lod = Math.max(1, Math.round(Math.log2(Math.max(dist, t) / t)));
+  return Math.min(dataset.lods - 1, lod);
 }
 
 // Only switch LOD once the boundary is crossed with ~10% margin, so a tile
 // sitting on a threshold doesn't reload every update.
-function wantLod(entry, dist) {
-  const want = desiredLod(dist);
-  if (entry.lod < 0 || want === entry.lod) return want;
-  const margin = want > entry.lod ? desiredLod(dist * 0.9) : desiredLod(dist * 1.1);
+function wantLod(entry, dist, hero) {
+  const want = desiredLod(dist, hero);
+  if (hero || entry.lod < 0 || want === entry.lod) return want;
+  const margin =
+    want > entry.lod ? desiredLod(dist * 0.9, false) : desiredLod(dist * 1.1, false);
   return margin === want ? want : entry.lod;
 }
 
@@ -91,16 +88,15 @@ async function loadLod(entry, x, y, lod) {
 
     const material = entry.texture
       ? new THREE.MeshStandardMaterial({ map: entry.texture, roughness: 1.0, metalness: 0.0 })
-      : terrainMat;
+      : cheapMat; // the hero tile is promoted to richMat by update()
     const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(x * dataset.tile_size_m, 0, y * dataset.tile_size_m);
-    mesh.castShadow = true;
     mesh.receiveShadow = true;
 
     if (entry.mesh) {
       scene.remove(entry.mesh);
       entry.mesh.geometry.dispose();
-      if (entry.mesh.material !== terrainMat) entry.mesh.material.dispose();
+      if (entry.mesh.material.map) entry.mesh.material.dispose();
     }
     entry.mesh = mesh;
     entry.lod = lod;
@@ -123,7 +119,7 @@ function unload(key, entry) {
   if (entry.mesh) {
     scene.remove(entry.mesh);
     entry.mesh.geometry.dispose();
-    if (entry.mesh.material !== terrainMat) entry.mesh.material.dispose();
+    if (entry.mesh.material.map) entry.mesh.material.dispose();
   }
   if (entry.texture) entry.texture.dispose();
   tiles.delete(key);
@@ -150,10 +146,12 @@ export function update(camera, nearDist) {
     }
   }
   wanted.sort((a, b) => a[0] - b[0]);
-  if (wanted.length > maxTiles) wanted.length = maxTiles;
+  if (wanted.length > MAX_TILES) wanted.length = MAX_TILES;
 
   const keep = new Set();
-  for (const [dist, x, y] of wanted) {
+  for (let i = 0; i < wanted.length; i++) {
+    const [dist, x, y] = wanted[i];
+    const hero = i === 0;
     const key = `${x},${y}`;
     keep.add(key);
     let entry = tiles.get(key);
@@ -161,12 +159,15 @@ export function update(camera, nearDist) {
       entry = { mesh: null, lod: -1, loading: false, texture: undefined, failed: false, fails: 0 };
       tiles.set(key, entry);
     }
-    // Only nearby tiles render into the shadow map — distant ones cost a
-    // full extra geometry pass without contributing visible shadows.
-    if (entry.mesh) entry.mesh.castShadow = dist < 1200;
+    if (entry.mesh) {
+      // Only the hero tile carries the expensive PBR material and casts
+      // shadows — everything else stays on the cheap shader.
+      if (!entry.texture) entry.mesh.material = hero ? richMat : cheapMat;
+      entry.mesh.castShadow = hero;
+    }
     if (entry.failed && performance.now() >= entry.retryAt) entry.failed = false;
     if (entry.failed || entry.loading || inFlight >= MAX_INFLIGHT) continue;
-    const want = wantLod(entry, dist);
+    const want = wantLod(entry, dist, hero);
     if (want !== entry.lod) loadLod(entry, x, y, want);
   }
 

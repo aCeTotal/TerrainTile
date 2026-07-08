@@ -19,7 +19,7 @@ let nearDist = 2500;
 /* ---------- controls ---------- */
 
 const keys = new Set();
-let yaw = 0, pitch = -0.6, speed = 150;
+let yaw = 0, pitch = -0.6, speed = 500;
 let locked = false;
 
 function setupControls(canvas) {
@@ -107,16 +107,18 @@ async function init() {
   loadSky();
   sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
-  sc.left = sc.bottom = -1600;
-  sc.right = sc.top = 1600;
+  // Only the hero tile casts shadows; a tight volume keeps them crisp.
+  sc.left = sc.bottom = -400;
+  sc.right = sc.top = 400;
   sc.near = 100;
   sc.far = 12000;
   sun.shadow.bias = -0.0003;
   sun.shadow.normalBias = 1.5;
   scene.add(sun);
   scene.add(sun.target);
+  applyQuality();
 
   setupControls(canvas);
   near.init(scene, dataset, far.setTileCovered);
@@ -173,7 +175,9 @@ function loadSky() {
 // Rolling frame-time average steers tile budget, LOD falloff and pixel
 // ratio. Down fast when below 60 fps, up slowly when there is headroom.
 // The closest tile ring stays at LOD0 no matter what (see near.js).
-const quality = { level: 1.0, frames: 0, time: 0 };
+// Starts conservative and works UP when there is headroom — performance
+// first, always; extra polish only when the GPU has proven it can pay.
+const quality = { level: 0.5, frames: 0, time: 0 };
 
 function adaptQuality(dt) {
   if (dt > 1.0) return; // tab was hidden; not a real frame time
@@ -192,12 +196,12 @@ function adaptQuality(dt) {
 
 function applyQuality() {
   const q = quality.level;
-  near.setQuality(Math.round(40 + 160 * q), 1 + 2 * q);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, q < 0.4 ? 1 : q < 0.65 ? 1.5 : 2));
-  // Shadows are the other half of the frame budget: shrink, then drop.
+  // Pixel ratio is the biggest lever; never above 1.5 — 4K-supersampling
+  // has killed weaker machines outright.
+  renderer.setPixelRatio(Math.min(devicePixelRatio, q < 0.4 ? 1 : q < 0.75 ? 1.25 : 1.5));
   const wantShadows = q >= 0.45;
   if (sun.castShadow !== wantShadows) sun.castShadow = wantShadows;
-  const size = q < 0.7 ? 2048 : 4096;
+  const size = q < 0.7 ? 1024 : 2048;
   if (sun.shadow.mapSize.x !== size) {
     sun.shadow.mapSize.set(size, size);
     if (sun.shadow.map) {

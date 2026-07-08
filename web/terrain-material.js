@@ -30,16 +30,35 @@ const MATERIALS = {
 
 let textures = null;
 
+// Neutral 1x1 placeholder so the material renders sanely before download:
+// mid-gray for color/roughness/displacement, flat (128,128,255) for normals.
+function placeholder(key) {
+  const px = key.endsWith('n') ? [128, 128, 255, 255] : [128, 128, 128, 255];
+  const t = new THREE.DataTexture(new Uint8Array(px), 1, 1);
+  t.needsUpdate = true;
+  return t;
+}
+
+// 2K sources are resized to 1K on the client: 4x less VRAM (the full set
+// froze weaker machines) while 1K / 5 m is still ~5 mm per texel.
 function loadTextures() {
   if (textures) return textures;
-  const loader = new THREE.TextureLoader();
   textures = {};
   for (const [key, [file, srgb]] of Object.entries(MATERIALS)) {
-    const t = loader.load(`/materials/${file}`);
+    const t = placeholder(key);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 4;
+    t.anisotropy = 2;
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.generateMipmaps = true;
     textures[key] = t;
+    fetch(`/materials/${file}`)
+      .then((r) => r.blob())
+      .then((b) => createImageBitmap(b, { resizeWidth: 1024, resizeHeight: 1024, resizeQuality: 'high' }))
+      .then((img) => {
+        t.image = img;
+        t.needsUpdate = true;
+      })
+      .catch(() => console.warn(`materiale ${file} kunne ikke lastes`));
   }
   return textures;
 }

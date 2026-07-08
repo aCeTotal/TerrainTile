@@ -12,11 +12,11 @@ use crate::server::state::SharedState;
 /// The whole-terrain layer targets roughly this many vertices in total; the
 /// per-tile grid is subsampled further until it fits, so even huge datasets
 /// render as one cheap mesh.
-const TARGET_VERTS: usize = 4_000_000;
+const TARGET_VERTS: usize = 2_000_000;
 
 /// Cache file name; versioned so a budget/format change ignores stale
 /// caches instead of serving them until the next pipeline run.
-const CACHE_NAME: &str = "far_v2.bin";
+const CACHE_NAME: &str = "far_v3.bin";
 
 /// GET /data/far.bin — every tile's coarsest mesh concatenated into one
 /// compact stream so the viewer can show the entire terrain with a single
