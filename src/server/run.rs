@@ -31,6 +31,10 @@ pub fn start(state: &SharedState, cfg: PipelineConfig, inputs: Vec<PathBuf>) -> 
     }
     let _ = state.events.send(json!({ "type": "started" }).to_string());
 
+    if let Err(e) = crate::server::project::save(&cfg, &inputs) {
+        eprintln!("project.json: {e:#}");
+    }
+
     let (tx, rx) = crossbeam_channel::unbounded();
     let cancel2 = cancel.clone();
     std::thread::spawn(move || runner::run(cfg, inputs, tx, cancel2));

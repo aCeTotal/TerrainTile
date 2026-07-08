@@ -66,7 +66,7 @@ async function browseTo(path) {
   const list = $('modal-list');
   list.innerHTML = '';
   for (const e of data.entries) {
-    if (modal.mode === 'output' && !e.dir) continue;
+    if (modal.mode !== 'input' && !e.dir) continue;
     const div = document.createElement('div');
     div.className = 'entry';
     div.innerHTML = `<span class="icon">${e.dir ? '📁' : '🗺'}</span><span>${e.name}</span>`;
@@ -95,13 +95,14 @@ function updateModalSelection() {
   $('modal-selection').textContent =
     n > 0 ? `${n} fil${n === 1 ? '' : 'er'} valgt` : 'Ingen filer valgt — «Velg» tar hele mappen.';
   if (modal.mode === 'output') $('modal-selection').textContent = 'Utdata skrives til denne mappen.';
+  if (modal.mode === 'project') $('modal-selection').textContent = 'Mappen åpnes som prosjekt.';
 }
 
 function openModal(mode, title) {
   modal.mode = mode;
   $('modal-title').textContent = title;
   $('modal').classList.remove('hidden');
-  browseTo(mode === 'output' ? state.output : null);
+  browseTo(mode === 'input' ? null : state.output);
 }
 
 function closeModal() { $('modal').classList.add('hidden'); }
@@ -112,7 +113,9 @@ $('modal-path').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') browseTo($('modal-path').value);
 });
 $('modal-choose').addEventListener('click', () => {
-  if (modal.mode === 'output') {
+  if (modal.mode === 'project') {
+    openProject(modal.path);
+  } else if (modal.mode === 'output') {
     state.output = modal.path;
     $('output-path').innerHTML = `<code>${modal.path}</code>`;
     $('output-path').classList.remove('muted');
@@ -128,6 +131,60 @@ $('modal-choose').addEventListener('click', () => {
 
 $('pick-input').addEventListener('click', () => openModal('input', 'Velg høydedata'));
 $('pick-output').addEventListener('click', () => openModal('output', 'Velg utmappe'));
+$('pick-project').addEventListener('click', () => openModal('project', 'Åpne prosjekt'));
+
+/* ---------- open existing project ---------- */
+
+async function openProject(path) {
+  const res = await fetch('/api/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'kunne ikke åpne prosjektet'); return; }
+
+  state.output = data.output;
+  $('output-path').innerHTML = `<code>${data.output}</code>`;
+  $('output-path').classList.remove('muted');
+
+  const c = data.config;
+  if (c) {
+    $('tile-size').value = String(c.tile_size_m);
+    $('overlap').checked = c.overlap;
+    $('lods').value = c.lods;
+    $('lods-val').textContent = c.lods;
+    $('threads').value = c.threads;
+    $('threads-val').textContent = c.threads;
+    $('nodata').value = c.nodata_height;
+    for (const f of MASK_FIELDS) {
+      $(`mask-${f.key}`).value = c.masks[f.key];
+      $(`mask-${f.key}-val`).textContent = c.masks[f.key];
+    }
+    $('use-ortho').checked = !!c.ortho;
+    $('ortho-config').classList.toggle('hidden', !c.ortho);
+    if (c.ortho) {
+      document.querySelector(`input[name="ortho-kind"][value="${c.ortho.kind}"]`).checked = true;
+      for (const kind of ['nib', 'wms', 'xyz']) {
+        $(`ortho-${kind}`).classList.toggle('hidden', c.ortho.kind !== kind);
+      }
+      if (c.ortho.kind === 'nib') $('nib-user').value = c.ortho.username;
+      if (c.ortho.kind === 'wms') $('wms-url').value = c.ortho.url;
+      if (c.ortho.kind === 'xyz') {
+        $('xyz-url').value = c.ortho.url;
+        $('zoom').value = c.ortho.zoom;
+        $('zoom-val').textContent = c.ortho.zoom;
+      }
+    }
+    state.inputs = c.inputs;
+    $('input-list').innerHTML = state.inputs.map((p) => `<code>${p}</code>`).join('');
+    $('input-list').classList.remove('muted');
+    scanInputs();
+  }
+  state.hasDataset = data.has_dataset;
+  if (data.has_dataset && !state.running) $('open-viewer').classList.remove('hidden');
+  updateStartButton();
+}
 
 /* ---------- scan + grid preview ---------- */
 

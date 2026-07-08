@@ -4,13 +4,15 @@
 
 import * as THREE from 'three';
 import { parseTtm } from './ttm.js';
+import { createTerrainMaterial } from './terrain-material.js';
 
 const MAX_INFLIGHT = 6;
-const MAX_TILES = 250;
+const MAX_TILES = 800;
 
 let scene = null;
 let dataset = null;
 let setCovered = null; // far.setTileCovered
+let terrainMat = null; // shared by every untextured tile
 let inFlight = 0;
 const tiles = new Map(); // "x,y" -> entry
 const covered = new Set(); // keys with a visible near mesh
@@ -19,6 +21,7 @@ export function init(sc, ds, setTileCovered) {
   scene = sc;
   dataset = ds;
   setCovered = setTileCovered;
+  terrainMat = createTerrainMaterial();
 }
 
 export function isCovered(x, y) {
@@ -76,15 +79,17 @@ async function loadLod(entry, x, y, lod) {
     const geo = parseTtm(await res.arrayBuffer());
 
     const material = entry.texture
-      ? new THREE.MeshLambertMaterial({ map: entry.texture })
-      : new THREE.MeshLambertMaterial({ color: 0x6d8f5a });
+      ? new THREE.MeshStandardMaterial({ map: entry.texture, roughness: 1.0, metalness: 0.0 })
+      : terrainMat;
     const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(x * dataset.tile_size_m, 0, y * dataset.tile_size_m);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
     if (entry.mesh) {
       scene.remove(entry.mesh);
       entry.mesh.geometry.dispose();
-      entry.mesh.material.dispose();
+      if (entry.mesh.material !== terrainMat) entry.mesh.material.dispose();
     }
     entry.mesh = mesh;
     entry.lod = lod;
@@ -104,7 +109,7 @@ function unload(key, entry) {
   if (entry.mesh) {
     scene.remove(entry.mesh);
     entry.mesh.geometry.dispose();
-    entry.mesh.material.dispose();
+    if (entry.mesh.material !== terrainMat) entry.mesh.material.dispose();
   }
   if (entry.texture) entry.texture.dispose();
   tiles.delete(key);

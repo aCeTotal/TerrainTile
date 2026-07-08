@@ -5,6 +5,7 @@ pub mod events;
 pub mod far;
 pub mod inspect;
 pub mod overview;
+pub mod project;
 pub mod run;
 pub mod state;
 
@@ -22,6 +23,7 @@ pub async fn serve(host: String, port: u16) -> anyhow::Result<()> {
         .route("/api/scan", post(api::scan))
         .route("/api/grid", get(api::grid))
         .route("/api/start", post(api::start))
+        .route("/api/open", post(project::open))
         .route("/api/cancel", post(api::cancel))
         .route("/api/events", get(events::events))
         .route("/data/far.bin", get(far::far_bin))

@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 
 const SKY = 0x9fc4e8;
 
-let renderer, scene, camera, dataset;
+let renderer, scene, camera, dataset, sun;
 let active = false;
 let initialized = false;
 let nearDist = 2500;
@@ -83,6 +83,10 @@ async function init() {
   const canvas = $('gl');
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY);
@@ -98,10 +102,19 @@ async function init() {
   camera.position.set(w / 2, (dataset.max_height || 100) + above, h / 2);
   scene.fog = new THREE.Fog(SKY, diag * 0.8, Math.max(30000, diag * 1.4));
 
-  scene.add(new THREE.HemisphereLight(0xcfe5ff, 0x3a3f33, 1.1));
-  const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
-  sun.position.set(0.4, 1, -0.6);
+  scene.add(new THREE.HemisphereLight(0xcfe5ff, 0x3a3f33, 0.6));
+  sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(4096, 4096);
+  const sc = sun.shadow.camera;
+  sc.left = sc.bottom = -1600;
+  sc.right = sc.top = 1600;
+  sc.near = 100;
+  sc.far = 12000;
+  sun.shadow.bias = -0.0003;
+  sun.shadow.normalBias = 1.5;
   scene.add(sun);
+  scene.add(sun.target);
 
   setupControls(canvas);
   near.init(scene, dataset, far.setTileCovered);
@@ -127,6 +140,17 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+// Keep the shadow volume centered on the camera. The anchor snaps to a
+// 2 m grid so the shadow map doesn't shimmer as the camera glides.
+const SUN_DIR = new THREE.Vector3(0.5, 0.75, -0.55).normalize();
+
+function updateSun() {
+  const ax = Math.round(camera.position.x / 2) * 2;
+  const az = Math.round(camera.position.z / 2) * 2;
+  sun.target.position.set(ax, 0, az);
+  sun.position.set(ax, 0, az).addScaledVector(SUN_DIR, 6000);
+}
+
 /* ---------- render loop ---------- */
 
 let lastFrame = 0;
@@ -138,6 +162,7 @@ function frame(now) {
   const dt = Math.min((now - lastFrame) / 1000, 0.1);
   lastFrame = now;
   moveCamera(dt);
+  updateSun();
   renderer.render(scene, camera);
 }
 
@@ -147,6 +172,7 @@ function tick() {
   if (!active || !dataset) return;
   near.update(camera, nearDist);
   updateHud();
+  updateSun();
   renderer.render(scene, camera);
 }
 

@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { gridIndices, parseFarHeader } from './ttm.js';
+import { createTerrainMaterial } from './terrain-material.js';
 
 let batched = null;
 let material = null;
@@ -20,7 +21,7 @@ export function progress() {
 
 export async function init(scene, ds, isTileCovered) {
   dataset = ds;
-  material = new THREE.MeshLambertMaterial({ color: 0x7d8f6d });
+  material = createTerrainMaterial();
 
   const res = await fetch('/data/far.bin');
   if (!res.ok) {
@@ -43,6 +44,7 @@ export async function init(scene, ds, isTileCovered) {
     head.count * idxPerTile,
     material,
   );
+  batched.receiveShadow = true;
   scene.add(batched);
 
   const sharedIdx = new THREE.BufferAttribute(gridIndices(v), 1);
