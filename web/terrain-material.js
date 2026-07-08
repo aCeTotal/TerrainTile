@@ -35,7 +35,14 @@ export function createTerrainMaterial() {
         `#include <common>
          varying vec3 vWPos;
          varying vec3 vWNormal;
-         float thash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`,
+         float thash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+         float tnoise(vec2 p) {
+           vec2 i = floor(p);
+           vec2 f = fract(p);
+           f = f * f * (3.0 - 2.0 * f);
+           return mix(mix(thash(i), thash(i + vec2(1.0, 0.0)), f.x),
+                      mix(thash(i + vec2(0.0, 1.0)), thash(i + vec2(1.0, 1.0)), f.x), f.y);
+         }`,
       )
       .replace(
         '#include <map_fragment>',
@@ -47,8 +54,8 @@ export function createTerrainMaterial() {
          float tWater = (1.0 - smoothstep(0.05, 0.5, tH)) * smoothstep(0.9962, 0.9995, tWn.y);
          #ifndef USE_MAP
            float tFade = exp(-length(vViewPosition) / 1200.0);
-           float tn = thash(floor(vWPos.xz));
-           float tn2 = thash(floor(vWPos.xz * 0.083));
+           float tn = tnoise(vWPos.xz);
+           float tn2 = tnoise(vWPos.xz * 0.083);
            vec3 tGrass = mix(vec3(0.30, 0.44, 0.19), vec3(0.42, 0.47, 0.23), tn2);
            tGrass = mix(tGrass, vec3(0.29, 0.35, 0.19), smoothstep(300.0, 900.0, tH));
            vec3 tDirt = mix(vec3(0.40, 0.33, 0.23), vec3(0.32, 0.26, 0.18), tn2);
@@ -59,7 +66,7 @@ export function createTerrainMaterial() {
            tc = mix(tc, tRock, smoothstep(35.0, 50.0, tSlope));
            tc = mix(tc, tSnow, smoothstep(1000.0, 1250.0, tH) * (1.0 - smoothstep(38.0, 55.0, tSlope)));
            tc *= 1.0 + (tn - 0.5) * 0.20 * tFade;
-           tc = mix(tc, mix(vec3(0.05, 0.20, 0.35), vec3(0.10, 0.31, 0.44), tn2), tWater);
+           tc = mix(tc, vec3(0.06, 0.22, 0.36), tWater);
            diffuseColor.rgb = tc;
          #endif`,
       )

@@ -7,7 +7,7 @@ import { parseTtm } from './ttm.js';
 import { createTerrainMaterial } from './terrain-material.js';
 
 const MAX_INFLIGHT = 6;
-const MAX_TILES = 800;
+const MAX_TILES = 200;
 
 let scene = null;
 let dataset = null;
@@ -39,7 +39,9 @@ function tileUrl(x, y, file) {
 }
 
 function desiredLod(dist) {
-  const t = dataset.tile_size_m;
+  // Full resolution out to ~3 tiles from the camera; each LOD covers 2x
+  // the distance beyond that.
+  const t = dataset.tile_size_m * 3;
   const lod = Math.round(Math.log2(Math.max(dist, t) / t));
   return Math.max(0, Math.min(dataset.lods - 1, lod));
 }

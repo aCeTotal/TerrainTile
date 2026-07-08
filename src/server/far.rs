@@ -75,11 +75,19 @@ struct Ds {
 fn build(root: &Path) -> Result<()> {
     let ds: Ds = serde_json::from_slice(&std::fs::read(root.join("dataset.json"))?)
         .context("dataset.json")?;
-    let lod = ds.lods - 1;
-    // Quads per tile edge at the coarsest LOD, then subsample by powers of
-    // two until the whole dataset fits the vertex budget.
-    let m = ds.tile_px >> lod;
     let count = ds.tiles_x * ds.tiles_y;
+    // Finest LOD whose whole-dataset vertex count fits the budget — the
+    // coarsest is often needlessly blocky for small datasets.
+    let mut lod = ds.lods - 1;
+    while lod > 0 {
+        let m = ds.tile_px >> (lod - 1);
+        if count * (m + 1) * (m + 1) > TARGET_VERTS {
+            break;
+        }
+        lod -= 1;
+    }
+    // Subsample by powers of two if even the coarsest LOD is too big.
+    let m = ds.tile_px >> lod;
     let mut stride = 1usize;
     while count * (m / stride + 1).pow(2) > TARGET_VERTS && (m / stride).is_multiple_of(2) {
         stride *= 2;
