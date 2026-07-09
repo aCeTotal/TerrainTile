@@ -57,6 +57,9 @@ impl WorldParams {
         if !(20_000.0..=100_000.0).contains(&self.margin_m) {
             bail!("havmarginen må være 2–10 mil");
         }
+        if self.tile_size_m < 256.0 {
+            bail!("flisstørrelsen må være minst 256 m");
+        }
         self.grid()?; // tile_px integer + divisible by the largest LOD stride
         Ok(())
     }

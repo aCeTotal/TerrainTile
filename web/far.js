@@ -68,8 +68,6 @@ export async function init(scene, ds, isTileCovered) {
 
   const sharedIdx = new THREE.BufferAttribute(gridIndices(v), 1);
   const T = dataset.tile_size_m;
-  const W = dataset.tiles_x * T;
-  const H = dataset.tiles_y * T;
   const recordSize = 8 + vertsPerTile * 24;
 
   // Parse + upload in slices so a huge dataset never freezes the tab.
