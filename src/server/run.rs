@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -9,10 +8,10 @@ use crate::pipeline::progress::Progress;
 use crate::pipeline::runner;
 use crate::server::state::{AppState, SharedState};
 
-/// Start the pipeline on a background thread and bridge its progress
+/// Start generation on a background thread and bridge its progress
 /// messages into the shared snapshot + SSE broadcast. Returns an error if a
 /// run is already active.
-pub fn start(state: &SharedState, cfg: PipelineConfig, inputs: Vec<PathBuf>) -> Result<(), String> {
+pub fn start(state: &SharedState, cfg: PipelineConfig) -> Result<(), String> {
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut inner = state.inner.lock().unwrap();
@@ -21,6 +20,7 @@ pub fn start(state: &SharedState, cfg: PipelineConfig, inputs: Vec<PathBuf>) -> 
         }
         inner.cancel = Some(cancel.clone());
         inner.output = Some(cfg.output.clone());
+        inner.edit = None; // params may change; recreated on next edit
         inner.snapshot.running = true;
         inner.snapshot.status = "Starter…".into();
         inner.snapshot.done = 0;
@@ -31,13 +31,13 @@ pub fn start(state: &SharedState, cfg: PipelineConfig, inputs: Vec<PathBuf>) -> 
     }
     let _ = state.events.send(json!({ "type": "started" }).to_string());
 
-    if let Err(e) = crate::server::project::save(&cfg, &inputs) {
+    if let Err(e) = crate::server::project::save(&cfg) {
         eprintln!("project.json: {e:#}");
     }
 
     let (tx, rx) = crossbeam_channel::unbounded();
     let cancel2 = cancel.clone();
-    std::thread::spawn(move || runner::run(cfg, inputs, tx, cancel2));
+    std::thread::spawn(move || runner::run(cfg, tx, cancel2));
 
     let state = state.clone();
     std::thread::spawn(move || {

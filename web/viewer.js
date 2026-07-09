@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import * as far from './far.js';
 import * as near from './near.js';
+import * as ed from './editor/editor.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,22 +23,35 @@ const keys = new Set();
 let yaw = 0, pitch = -0.6, speed = 500;
 let locked = false;
 
+let rmbLook = false; // edit mode: right-drag looks around
+
 function setupControls(canvas) {
   canvas.addEventListener('click', () => {
-    if (active && dataset) canvas.requestPointerLock();
+    if (active && dataset && ed.isFly()) canvas.requestPointerLock();
   });
   document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === canvas;
   });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!ed.isFly() && e.button === 2) rmbLook = true;
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (e.button === 2) rmbLook = false;
+  });
   document.addEventListener('mousemove', (e) => {
-    if (!locked) return;
+    if (!locked && !rmbLook) return;
     yaw -= e.movementX * 0.0022;
     pitch -= e.movementY * 0.0022;
     pitch = Math.max(-1.55, Math.min(1.55, pitch));
   });
-  document.addEventListener('keydown', (e) => { if (locked) keys.add(e.code); });
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (locked || (active && !ed.isFly())) keys.add(e.code);
+  });
   document.addEventListener('keyup', (e) => keys.delete(e.code));
   canvas.addEventListener('wheel', (e) => {
+    if (!ed.isFly()) return; // edit mode: wheel = brush radius
     speed *= e.deltaY < 0 ? 1.25 : 0.8;
     speed = Math.max(2, Math.min(5000, speed));
   }, { passive: true });
@@ -45,7 +59,7 @@ function setupControls(canvas) {
 
 function moveCamera(dt) {
   camera.rotation.set(pitch, yaw, 0, 'YXZ');
-  if (!locked) return;
+  if (!locked && ed.isFly()) return;
   const v = speed * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1) * dt;
   const fwd = new THREE.Vector3();
   camera.getWorldDirection(fwd);
@@ -70,8 +84,9 @@ function updateHud() {
   const farTxt = f.total > 0 && f.loaded < f.total
     ? `  •  oversikt ${Math.round((100 * f.loaded) / f.total)} %`
     : '';
+  const ms = quality.avg > 0 ? `  •  ${(quality.avg * 1000).toFixed(1)} ms` : '';
   $('hud-tiles').textContent =
-    `${s.meshes} detaljfliser (${s.inFlight} lastes)  •  kvalitet ${Math.round(quality.level * 100)} %${farTxt}`;
+    `${s.meshes} detaljfliser (${s.inFlight} lastes)  •  kvalitet ${Math.round(quality.level * 100)} %${ms}${farTxt}`;
   $('hud-speed').textContent = `Fart ${speed.toFixed(0)} m/s`;
 }
 
@@ -123,6 +138,9 @@ async function init() {
   setupControls(canvas);
   near.init(scene, dataset, far.setTileCovered);
   far.init(scene, dataset, near.isCovered); // streams in the background
+  ed.init(scene, camera, canvas, dataset, (mode) => {
+    if (mode !== 'fly' && document.pointerLockElement) document.exitPointerLock();
+  });
 
   $('view-dist').addEventListener('input', (e) => {
     nearDist = parseInt(e.target.value);
@@ -142,6 +160,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  ed.resize();
 }
 
 /* ---------- sky ---------- */
@@ -170,27 +189,33 @@ function loadSky() {
   );
 }
 
-/* ---------- adaptive quality: guarantee 60 fps ---------- */
+/* ---------- adaptive quality: 10 ms frame budget (100 fps) ---------- */
 
-// Rolling frame-time average steers tile budget, LOD falloff and pixel
-// ratio. Down fast when below 60 fps, up slowly when there is headroom.
-// The closest tile ring stays at LOD0 no matter what (see near.js).
+// Rolling frame-time average steers rich-tile count, pixel ratio and
+// shadows toward a 10 ms budget. rAF is vsync-capped, so when the display
+// itself refreshes slower than 100 Hz the budget falls back to the
+// observed refresh interval — the target is frame TIME, not raw fps.
 // Starts conservative and works UP when there is headroom — performance
 // first, always; extra polish only when the GPU has proven it can pay.
-const quality = { level: 0.5, frames: 0, time: 0 };
+const quality = { level: 0.5, frames: 0, time: 0, minDt: 1 / 60, avg: 0 };
 
 function adaptQuality(dt) {
   if (dt > 1.0) return; // tab was hidden; not a real frame time
+  // Decaying minimum ≈ the display's refresh interval under vsync.
+  quality.minDt = Math.min(quality.minDt * 1.001, Math.max(dt, 0.002));
   quality.frames++;
   quality.time += Math.min(dt, 0.25);
   if (quality.frames < 30) return;
   const avg = quality.time / quality.frames;
+  quality.avg = avg;
   quality.frames = 0;
   quality.time = 0;
-  // Panic drop when far below 60, gentle recovery when clearly above.
-  if (avg > 0.0175) quality.level = Math.max(0.2, quality.level - (avg > 0.033 ? 0.3 : 0.15));
-  else if (avg < 0.014) quality.level = Math.min(1.0, quality.level + 0.05);
-  else return;
+  const budget = Math.max(0.01, quality.minDt * 1.02);
+  if (avg > budget * 1.12) {
+    quality.level = Math.max(0.2, quality.level - (avg > budget * 2 ? 0.3 : 0.15));
+  } else if (avg < budget * 0.9) {
+    quality.level = Math.min(1.0, quality.level + 0.05);
+  } else return;
   applyQuality();
 }
 
@@ -199,6 +224,7 @@ function applyQuality() {
   // Pixel ratio is the biggest lever; never above 1.5 — 4K-supersampling
   // has killed weaker machines outright.
   renderer.setPixelRatio(Math.min(devicePixelRatio, q < 0.4 ? 1 : q < 0.75 ? 1.25 : 1.5));
+  near.setRichCount(1 + Math.round(q * 4));
   const wantShadows = q >= 0.45;
   if (sun.castShadow !== wantShadows) sun.castShadow = wantShadows;
   const size = q < 0.7 ? 1024 : 2048;
@@ -235,17 +261,19 @@ function frame(now) {
   moveCamera(dt);
   adaptQuality(dt);
   updateSun();
-  renderer.render(scene, camera);
+  renderer.render(scene, ed.activeCamera() || camera);
 }
 
 // Tile streaming runs on a timer, not rAF: loads keep flowing even when
 // the browser throttles animation frames (hidden tab, headless).
 function tick() {
   if (!active || !dataset) return;
-  near.update(camera, nearDist);
+  // In the aerial view the far layer + sea plane is the whole picture —
+  // no point streaming detail tiles under it.
+  if (!ed.aerialActive()) near.update(camera, nearDist);
   updateHud();
   updateSun();
-  renderer.render(scene, camera);
+  renderer.render(scene, ed.activeCamera() || camera);
 }
 
 /* ---------- public API (called from app.js) ---------- */
@@ -273,4 +301,21 @@ export function leave() {
   active = false;
   if (ticker) { clearInterval(ticker); ticker = null; }
   if (document.pointerLockElement) document.exitPointerLock();
+}
+
+/// SSE `tiles` event: the server rebuilt these after an edit.
+export function onTiles(names) {
+  if (!initialized) return;
+  near.refresh(names);
+  ed.onTiles();
+}
+
+/// SSE `scatter`: scatter.json was regenerated.
+export function onScatter() {
+  if (initialized) ed.onScatter();
+}
+
+/// SSE `conform`: roads re-blended, placements re-snapped.
+export function onConform() {
+  if (initialized) ed.onConform();
 }

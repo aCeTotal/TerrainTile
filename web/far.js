@@ -1,15 +1,16 @@
 // Whole-terrain layer: every tile at coarse LOD in ONE BatchedMesh (single
-// draw call), streamed from /data/far.bin. Textured with the server-built
-// overview mosaic. Instances under loaded near tiles are hidden so the
-// detailed meshes never z-fight with the coarse ones.
+// draw call), streamed from /data/far.bin. Instances under loaded near
+// tiles are hidden so the detailed meshes never z-fight with the coarse
+// ones.
 
 import * as THREE from 'three';
 import { gridIndices, parseFarHeader } from './ttm.js';
-import { createSimpleTerrainMaterial } from './terrain-simple.js';
+import { createSimpleTerrainMaterial, setOverview } from './terrain-simple.js';
 
 let batched = null;
 let material = null;
 let dataset = null;
+let sea = null; // one plane at y=0 covering the whole world
 let instances = new Map(); // "x,y" -> instanceId
 let hiddenWanted = new Set(); // near tiles that arrived before their far instance
 let loadedCount = 0;
@@ -19,9 +20,27 @@ export function progress() {
   return { loaded: loadedCount, total: totalCount };
 }
 
+/// The sea plane, so editor raycasts can hit open water.
+export function seaMeshes() {
+  return sea ? [sea] : [];
+}
+
 export async function init(scene, ds, isTileCovered) {
   dataset = ds;
   material = createSimpleTerrainMaterial();
+
+  // Flat sea tiles are not in far.bin and never stream — one huge plane
+  // at exactly y=0 is the entire ocean (the simple material's water path
+  // colors it and sinks it WATER_DROP).
+  const W = ds.tiles_x * ds.tile_size_m;
+  const H = ds.tiles_y * ds.tile_size_m;
+  const seaGeo = new THREE.PlaneGeometry(W, H);
+  seaGeo.rotateX(-Math.PI / 2);
+  sea = new THREE.Mesh(seaGeo, createSimpleTerrainMaterial());
+  sea.position.set(W / 2, 0, H / 2);
+  scene.add(sea);
+
+  loadOverview(W, H); // class colors for the far/cheap layers
 
   const res = await fetch('/data/far.bin');
   if (!res.ok) {
@@ -98,8 +117,22 @@ export async function init(scene, ds, isTileCovered) {
       sliceStart = performance.now();
     }
   }
+}
 
-  loadOverviewTexture();
+// Bake of every tile's strongest class color, built server-side.
+async function loadOverview(W, H) {
+  try {
+    const res = await fetch('/data/overview.png');
+    if (!res.ok) return;
+    const bitmap = await createImageBitmap(await res.blob());
+    const tex = new THREE.Texture(bitmap);
+    tex.flipY = false; // v=0 is the world's north edge = image top row
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    setOverview(tex, W, H);
+  } catch {
+    // procedural ramp remains the fallback
+  }
 }
 
 // Hide/show the coarse instance under a near tile.
@@ -109,31 +142,4 @@ export function setTileCovered(x, y, covered) {
   else hiddenWanted.delete(key);
   const iid = instances.get(key);
   if (batched && iid !== undefined) batched.setVisibleAt(iid, !covered);
-}
-
-// The overview mosaic is built server-side on first request; poll until
-// ready, then swap the flat color for real orthophoto.
-async function loadOverviewTexture() {
-  for (let attempt = 0; attempt < 240; attempt++) {
-    let res;
-    try {
-      res = await fetch('/data/overview.png');
-    } catch {
-      return;
-    }
-    if (res.status === 404) return; // dataset has no orthophotos
-    if (res.ok) {
-      const bitmap = await createImageBitmap(await res.blob());
-      const tex = new THREE.Texture(bitmap);
-      tex.flipY = false; // v=0 is the dataset's north edge = image top row
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 4;
-      tex.needsUpdate = true;
-      material.map = tex;
-      material.color.set(0xffffff);
-      material.needsUpdate = true;
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 5000)); // 202: still building
-  }
 }

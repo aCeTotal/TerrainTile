@@ -8,10 +8,35 @@ import * as THREE from 'three';
 
 export const WATER_DROP = 0.7; // meters the 0 m fill plane is lowered
 
+// World-wide class color map (overview.png): when set, the cheap layer
+// follows the painted material classes instead of the built-in ramp.
+let overview = null; // { tex, w, h }
+const registry = new Set();
+
+export function setOverview(tex, w, h) {
+  overview = { tex, w, h };
+  for (const mat of registry) applyOverview(mat);
+}
+
+function applyOverview(mat) {
+  const sh = mat.userData.shader;
+  if (!sh || !overview) return;
+  sh.uniforms.uOv.value = overview.tex;
+  sh.uniforms.uWorld.value.set(overview.w, overview.h);
+  sh.uniforms.uOvOn.value = 1.0;
+}
+
 export function createSimpleTerrainMaterial() {
   const mat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0 });
+  registry.add(mat);
 
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uOv = { value: overview ? overview.tex : new THREE.Texture() };
+    shader.uniforms.uWorld = {
+      value: new THREE.Vector2(overview ? overview.w : 1, overview ? overview.h : 1),
+    };
+    shader.uniforms.uOvOn = { value: overview ? 1.0 : 0.0 };
+    mat.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -46,6 +71,9 @@ export function createSimpleTerrainMaterial() {
          varying vec3 vWPos;
          varying vec3 vWNormal;
          varying float vWater;
+         uniform sampler2D uOv;
+         uniform vec2 uWorld;
+         uniform float uOvOn;
          float thash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
          float tnoise(vec2 p) {
            vec2 i = floor(p);
@@ -75,6 +103,10 @@ export function createSimpleTerrainMaterial() {
          tc = mix(tc, vec3(0.90, 0.92, 0.96),
                   smoothstep(1000.0, 1250.0, tH) * (1.0 - smoothstep(38.0, 55.0, tSlope)));
          float macro = tnoise(vWPos.xz * 0.0012) * 0.6 + tnoise(vWPos.xz * 0.009) * 0.4;
+         if (uOvOn > 0.5) {
+           // Follow the painted class colors at distance.
+           tc = texture(uOv, vWPos.xz / uWorld).rgb;
+         }
          tc *= 0.86 + 0.28 * macro;
          vec3 tWaterCol = mix(vec3(0.14, 0.36, 0.42), vec3(0.05, 0.21, 0.35), smoothstep(0.3, 1.0, tWater));
          tc = mix(tc, tWaterCol, smoothstep(0.15, 0.75, tWater));

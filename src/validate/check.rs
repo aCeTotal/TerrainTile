@@ -4,7 +4,6 @@ use serde::Serialize;
 
 use crate::export::meshbin;
 use crate::tile::grid::{TileGrid, TileId};
-use crate::tile::masks::MASK_NAMES;
 use crate::tile::meta::TileMeta;
 
 const MAX_ENTRIES: usize = 200;
@@ -43,17 +42,9 @@ pub fn run(out: &Path, grid: &TileGrid, lods: usize, overlap: bool) -> Report {
 
     for t in grid.tiles() {
         let dir = tiles_dir.join(t.name());
-        for k in 0..lods {
-            let f = dir.join(format!("mesh_lod{k}.bin"));
-            if !f.exists() {
-                Report::push(&mut rep.missing, &mut truncated, format!("{}/mesh_lod{k}.bin", t.name()));
-            }
-        }
-        for name in MASK_NAMES {
-            if !dir.join(format!("mask_{name}.png")).exists() {
-                Report::push(&mut rep.missing, &mut truncated, format!("{}/mask_{name}.png", t.name()));
-            }
-        }
+        // Read metadata first: flat sea tiles have minimal meshes and no
+        // mask files by design.
+        let mut is_flat = false;
         let meta_path = dir.join("metadata.json");
         match std::fs::read(&meta_path) {
             Err(_) => Report::push(&mut rep.missing, &mut truncated, format!("{}/metadata.json", t.name())),
@@ -64,6 +55,7 @@ pub fn run(out: &Path, grid: &TileGrid, lods: usize, overlap: bool) -> Report {
                     format!("{}: {e}", t.name()),
                 ),
                 Ok(m) => {
+                    is_flat = m.flat;
                     if m.lods.len() != lods {
                         Report::push(
                             &mut rep.meta_errors,
@@ -73,6 +65,15 @@ pub fn run(out: &Path, grid: &TileGrid, lods: usize, overlap: bool) -> Report {
                     }
                 }
             },
+        }
+        for k in 0..lods {
+            let f = dir.join(format!("mesh_lod{k}.bin"));
+            if !f.exists() {
+                Report::push(&mut rep.missing, &mut truncated, format!("{}/mesh_lod{k}.bin", t.name()));
+            }
+        }
+        if !is_flat && !dir.join("class.bin").exists() {
+            Report::push(&mut rep.missing, &mut truncated, format!("{}/class.bin", t.name()));
         }
     }
 
@@ -120,24 +121,32 @@ fn check_edges(tiles_dir: &Path, grid: &TileGrid, rep: &mut Report, truncated: &
                 prev_row_south[x] = None;
                 continue;
             };
+            // Flat sea tiles (2 edge vertices) are exactly 0 along every
+            // edge, as is any neighbor's shared edge — skip the bitwise
+            // comparison, the resolutions differ by design.
+            let flat = |v: &Vec<f32>| v.len() == 2;
             if let Some(we) = &prev_east {
-                let diffs = count_diffs(we, &e.west);
-                if diffs > 0 {
-                    Report::push(
-                        &mut rep.edge_mismatches,
-                        truncated,
-                        format!("tile_x{}_y{y} øst ≠ {} vest ({diffs} avvik)", x - 1, t.name()),
-                    );
+                if !flat(we) && !flat(&e.west) {
+                    let diffs = count_diffs(we, &e.west);
+                    if diffs > 0 {
+                        Report::push(
+                            &mut rep.edge_mismatches,
+                            truncated,
+                            format!("tile_x{}_y{y} øst ≠ {} vest ({diffs} avvik)", x - 1, t.name()),
+                        );
+                    }
                 }
             }
             if let Some(ns) = &prev_row_south[x] {
-                let diffs = count_diffs(ns, &e.north);
-                if diffs > 0 {
-                    Report::push(
-                        &mut rep.edge_mismatches,
-                        truncated,
-                        format!("tile_x{x}_y{} sør ≠ {} nord ({diffs} avvik)", y - 1, t.name()),
-                    );
+                if !flat(ns) && !flat(&e.north) {
+                    let diffs = count_diffs(ns, &e.north);
+                    if diffs > 0 {
+                        Report::push(
+                            &mut rep.edge_mismatches,
+                            truncated,
+                            format!("tile_x{x}_y{} sør ≠ {} nord ({diffs} avvik)", y - 1, t.name()),
+                        );
+                    }
                 }
             }
             prev_east = Some(e.east);

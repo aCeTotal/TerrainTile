@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -7,8 +8,24 @@ use tokio::sync::Mutex as AsyncMutex;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::import::dataset::DatasetInfo;
+use crate::edit::cover::Cover;
+use crate::gen::heightfield::HeightSource;
+use crate::gen::world::WorldParams;
+use crate::tile::classdef::ClassDef;
+use crate::tile::grid::{TileGrid, TileId};
 use crate::validate::check::Report;
+
+/// Everything the edit endpoints need for the open project: the composite
+/// height source (generator + overlays), painted class coverage and the
+/// rebuild worker's inbox.
+pub struct EditCtx {
+    pub world: WorldParams,
+    pub classes: Vec<ClassDef>,
+    pub grid: TileGrid,
+    pub src: Arc<HeightSource>,
+    pub cover: Arc<Cover>,
+    pub dirty_tx: crossbeam_channel::Sender<BTreeSet<TileId>>,
+}
 
 /// Everything the browser needs to render current pipeline status.
 /// Sent as one snapshot on connect, kept in sync via SSE events.
@@ -29,10 +46,11 @@ pub struct Inner {
     pub snapshot: Snapshot,
     /// Cancel flag of the active run.
     pub cancel: Option<Arc<AtomicBool>>,
-    /// Last successful full scan: inputs + info, used by /api/grid.
-    pub scanned: Option<(Vec<PathBuf>, DatasetInfo)>,
     /// Output dir served under /data/.
     pub output: Option<PathBuf>,
+    /// Lazily created on the first edit request; dropped when the output
+    /// changes (its rebuild worker exits when the channel closes).
+    pub edit: Option<Arc<EditCtx>>,
 }
 
 pub struct AppState {
@@ -41,8 +59,6 @@ pub struct AppState {
     pub events: broadcast::Sender<String>,
     /// Serializes far.bin cache builds (concurrent viewers must not build twice).
     pub far_lock: AsyncMutex<()>,
-    /// True while the overview mosaic is being built in the background.
-    pub overview_building: AtomicBool,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -53,16 +69,15 @@ impl AppState {
         Arc::new(AppState {
             inner: Mutex::new(Inner {
                 snapshot: Snapshot {
-                    status: "Velg høydedata for å starte".into(),
+                    status: "Nytt eller åpne prosjekt for å starte".into(),
                     ..Default::default()
                 },
                 cancel: None,
-                scanned: None,
                 output: None,
+                edit: None,
             }),
             events,
             far_lock: AsyncMutex::new(()),
-            overview_building: AtomicBool::new(false),
         })
     }
 

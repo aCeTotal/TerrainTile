@@ -20,110 +20,25 @@
     <h1>TerrainTile</h1>
   </div>
   <nav class="tabs">
-    <button id="tab-pipeline" class="tab active">Pipeline</button>
+    <button id="tab-project" class="tab active">Prosjekt</button>
     <button id="tab-viewer" class="tab">3D-visning</button>
   </nav>
   <div id="run-pill" class="pill idle">Inaktiv</div>
 </header>
 
-<!-- ======================= PIPELINE ======================= -->
-<main id="view-pipeline" class="pipeline">
-
-  <div class="col config">
-
+<!-- ======================= PROJECT / PROGRESS ======================= -->
+<main id="view-project" class="project">
+  <div class="col">
     <section class="card">
-      <h2>Import</h2>
-      <div class="row">
-        <button id="pick-input" class="btn">Velg høydedata…</button>
-        <button id="pick-project" class="btn">Åpne prosjekt…</button>
-      </div>
-      <div id="input-list" class="path-list muted">Ingen høydedata valgt.</div>
-      <p class="hint">Mapper, .tif/.tiff-filer eller ZIP fra hoydedata.no — ZIP pakkes ut automatisk.</p>
-      <div id="scan-info" class="info-box hidden"></div>
-      <div id="scan-error" class="error-box hidden"></div>
-    </section>
-
-    <section class="card">
-      <h2>Fliser</h2>
-      <label class="field">
-        <span>Flisstørrelse</span>
-        <select id="tile-size">
-          <option value="256">256 m</option>
-          <option value="512" selected>512 m</option>
-          <option value="1024">1024 m</option>
-          <option value="2048">2048 m</option>
-        </select>
-      </label>
-      <label class="field check">
-        <input type="checkbox" id="overlap" checked>
-        <span>Delte kantvertekser (anbefalt)</span>
-      </label>
-      <label class="field">
-        <span>LOD-nivåer: <b id="lods-val">6</b></span>
-        <input type="range" id="lods" min="1" max="8" value="6">
-      </label>
-      <label class="field">
-        <span>Tråder (0 = alle): <b id="threads-val">0</b></span>
-        <input type="range" id="threads" min="0" max="64" value="0">
-      </label>
-      <label class="field">
-        <span>Nodata-høyde (hav, m)</span>
-        <input type="number" id="nodata" value="0" step="1">
-      </label>
-      <label class="field check">
-        <input type="checkbox" id="force">
-        <span>Tving full rebuild (ellers bygges kun endringer)</span>
-      </label>
-      <div id="grid-info" class="hint"></div>
-    </section>
-
-    <section class="card">
-      <h2>Ortofoto</h2>
-      <label class="field check">
-        <input type="checkbox" id="use-ortho" checked>
-        <span>Hent ortofoto fra nettet</span>
-      </label>
-      <div id="ortho-config">
-        <label class="field check"><input type="radio" name="ortho-kind" value="nib" checked><span>Norge i bilder (GeoID-innlogging)</span></label>
-        <label class="field check"><input type="radio" name="ortho-kind" value="wms"><span>WMS med BAAT-ticket</span></label>
-        <label class="field check"><input type="radio" name="ortho-kind" value="xyz"><span>XYZ tile-server</span></label>
-        <div id="ortho-nib" class="ortho-fields">
-          <label class="field"><span>GeoID-brukernavn</span><input type="text" id="nib-user" autocomplete="off"></label>
-          <label class="field"><span>GeoID-passord</span><input type="password" id="nib-pass"></label>
-          <p class="hint">Token hentes og fornyes automatisk. Gratis konto: geoid.no</p>
-        </div>
-        <div id="ortho-wms" class="ortho-fields hidden">
-          <label class="field"><span>WMS-URL med LAYERS og ticket</span><input type="text" id="wms-url"></label>
-          <p class="hint">Hele request-URL-er fra nettleseren kan limes inn direkte.</p>
-        </div>
-        <div id="ortho-xyz" class="ortho-fields hidden">
-          <label class="field"><span>XYZ URL-mal ({z}/{x}/{y})</span><input type="text" id="xyz-url"></label>
-          <label class="field"><span>Zoom: <b id="zoom-val">17</b></span><input type="range" id="zoom" min="12" max="19" value="17"></label>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Masker (DTM-terskler)</h2>
-      <div id="mask-sliders"></div>
-    </section>
-
-    <section class="card">
-      <h2>Eksport</h2>
-      <div class="row">
-        <button id="pick-output" class="btn">Velg utmappe…</button>
-      </div>
-      <div id="output-path" class="path-list muted">Ingen utmappe valgt.</div>
+      <h2>Prosjekt</h2>
+      <div id="project-info" class="path-list muted">Ingen prosjekt åpnet.</div>
       <div class="row run-row">
-        <button id="start" class="btn primary" disabled>Start prosessering</button>
+        <button id="regen" class="btn hidden">Generer på nytt</button>
         <button id="cancel" class="btn danger hidden">Avbryt</button>
+        <button id="open-viewer" class="btn primary hidden">Åpne 3D-visning →</button>
       </div>
-      <p id="start-hint" class="hint">Velg høydedata og utmappe først.</p>
     </section>
 
-  </div>
-
-  <div class="col progress">
     <section class="card grow">
       <h2>Fremdrift</h2>
       <div id="status" class="status">Kobler til…</div>
@@ -136,25 +51,125 @@
         </div>
       </div>
       <div id="report" class="hidden"></div>
-      <div class="row">
-        <button id="open-viewer" class="btn primary hidden">Åpne 3D-visning →</button>
-      </div>
       <h3>Logg</h3>
       <div id="log" class="log"></div>
     </section>
   </div>
-
 </main>
 
 <!-- ======================= 3D VIEWER ======================= -->
 <main id="view-viewer" class="viewer hidden">
   <canvas id="gl"></canvas>
   <div id="viewer-empty" class="viewer-msg">
-    <h2>Ingen datasett ennå</h2>
-    <p>Kjør pipelinen ferdig, så kan du fly rundt i terrenget her.</p>
+    <h2>Ingen verden ennå</h2>
+    <p>Generer et prosjekt ferdig, så kan du fly rundt i terrenget her.</p>
   </div>
   <div id="viewer-hud" class="hud hidden">
-    <div class="hud-box">
+    <div id="toolbar" class="hud-box toolbar">
+      <button data-mode="fly" class="tbtn active">Fly</button>
+      <button data-mode="sculpt" class="tbtn">Sculpt <kbd>1</kbd></button>
+      <button data-mode="texture" class="tbtn">Texture <kbd>2</kbd></button>
+      <button data-mode="meshes" class="tbtn">Mesh <kbd>3</kbd></button>
+      <button data-mode="tomt" class="tbtn">Tomt og bygninger <kbd>4</kbd></button>
+    </div>
+    <div id="brush-panel" class="hud-box tool-panel hidden">
+      <div id="sculpt-tools" class="row">
+        <button data-tool="raise" class="tbtn small active">Hev</button>
+        <button data-tool="lower" class="tbtn small">Senk</button>
+        <button data-tool="flatten" class="tbtn small">Flat ut</button>
+        <button data-tool="smooth" class="tbtn small">Glatt</button>
+      </div>
+      <label>Radius <b id="brush-radius-val"></b>
+        <input type="range" id="brush-radius" min="4" max="500" step="1" value="60">
+      </label>
+      <label>Styrke <b id="brush-strength-val"></b>
+        <input type="range" id="brush-strength" min="0.1" max="5" step="0.1" value="1">
+      </label>
+      <p class="hint">Tegn med venstre musetast • høyre musetast ser rundt • hjul = radius • Tab = fly</p>
+    </div>
+    <div id="paint-panel" class="hud-box tool-panel wide hidden">
+      <div class="row">
+        <button class="tbtn small aerial-btn">Flyfoto <kbd>F</kbd></button>
+        <button id="class-paint" class="tbtn small">Mal</button>
+        <button id="class-erase" class="tbtn small">Visk</button>
+        <button id="class-new" class="tbtn small">Ny klasse</button>
+        <button id="class-delete" class="tbtn small">Slett</button>
+      </div>
+      <div id="class-list" class="class-list"></div>
+      <div id="class-details" class="hidden">
+        <div class="row">
+          <label>Navn <input type="text" id="cls-name"></label>
+          <label>Farge <input type="color" id="cls-color"></label>
+          <label>Vekt <input type="number" id="cls-weight" min="0" step="0.5" style="width:4.5rem"></label>
+        </div>
+        <div class="row">
+          <label>Høyde min <input type="number" id="cls-hmin" step="0.5" style="width:4.5rem"></label>
+          <label>maks <input type="number" id="cls-hmax" step="0.5" style="width:4.5rem"></label>
+          <label>Vinkel min <input type="number" id="cls-smin" step="1" style="width:4rem"></label>
+          <label>maks <input type="number" id="cls-smax" step="1" style="width:4rem"></label>
+        </div>
+        <div class="row">
+          <label class="field check"><input type="checkbox" id="cls-base"><span>Auto (uten maling)</span></label>
+          <label class="field check"><input type="checkbox" id="cls-sharp"><span>Skarp overgang</span></label>
+        </div>
+        <div id="mat-list" class="mat-list"></div>
+        <input type="file" id="mat-file" accept=".zip,.png,.jpg,.jpeg" hidden>
+        <div class="row"><button id="mat-upload" class="tbtn small">Last opp materiale (.zip)…</button></div>
+      </div>
+      <p class="hint">Velg klasse, «Mal», og tegn med freetool på flyfotoet. Tomme felt = ingen grense.</p>
+    </div>
+    <div id="meshes-panel" class="hud-box tool-panel hidden">
+      <div class="row">
+        <button data-mtool="place" class="tbtn small active">Plasser</button>
+        <button data-mtool="road" class="tbtn small">Vei</button>
+        <button data-mtool="scatter" class="tbtn small">Scatter</button>
+      </div>
+      <label>Modell <select id="asset-select"></select></label>
+      <input type="file" id="asset-file" accept=".glb,.gltf" hidden>
+      <div class="row" style="margin-top:.4rem">
+        <button id="asset-upload" class="tbtn small">Last opp GLB…</button>
+        <button class="tbtn small aerial-btn">Flyfoto <kbd>F</kbd></button>
+      </div>
+      <div class="row" style="margin-top:.4rem">
+        <button data-gizmo="translate" class="tbtn small active">Flytt</button>
+        <button data-gizmo="rotate" class="tbtn small">Roter</button>
+        <button data-gizmo="scale" class="tbtn small">Skaler</button>
+      </div>
+      <label>Veibredde (m) <input type="number" id="road-width" value="12" min="3" step="1" style="width:4.5rem"></label>
+      <div class="row">
+        <label>Tetthet/ha <input type="number" id="sc-density" value="120" min="1" style="width:4.5rem"></label>
+        <label>Avstand (m) <input type="number" id="sc-spacing" value="5" min="0.5" step="0.5" style="width:4rem"></label>
+      </div>
+      <div class="row">
+        <label>Skala min <input type="number" id="sc-smin" value="0.8" step="0.1" style="width:4rem"></label>
+        <label>maks <input type="number" id="sc-smax" value="1.3" step="0.1" style="width:4rem"></label>
+      </div>
+      <div id="scatter-list" class="mat-list"></div>
+      <div class="row"><button id="conform" class="tbtn small">Tilpass terreng</button></div>
+      <p class="hint">Plasser: klikk = plasser/velg, Del = slett, flytting snapper til bakken.
+        Vei: klikk punkter, Enter/dobbeltklikk = legg vei, Backspace = angre punkt.
+        Scatter: freetool på flyfotoet.</p>
+    </div>
+    <div id="tomt-panel" class="hud-box tool-panel hidden">
+      <div class="row">
+        <button class="tbtn small aerial-btn">Flyfoto <kbd>F</kbd></button>
+        <button id="plot-new" class="tbtn small">Ny tomt</button>
+        <button id="zone-new" class="tbtn small">Ny bygning</button>
+      </div>
+      <div class="row" style="margin-top:.4rem">
+        <label>Type <select id="zone-type"></select></label>
+        <label>Etasjer <input type="number" id="zone-floors" value="2" min="1" style="width:3.5rem"></label>
+      </div>
+      <div class="row">
+        <input type="text" id="zone-type-name" placeholder="ny bygningstype…" style="width:9rem">
+        <button id="zone-type-add" class="tbtn small">+ type</button>
+      </div>
+      <label>Rotasjon valgt <input type="range" id="zone-rot" min="-180" max="180" value="0"></label>
+      <label class="field check"><input type="checkbox" id="plots-visible" checked><span>Vis markeringer (kun editor)</span></label>
+      <p class="hint">Dra på flyfotoet for firkant • dra hjørner for vinkler • klikk = velg •
+        Del = slett. Spillere ser aldri markeringene — de eksporteres til plots.json for Bevy.</p>
+    </div>
+    <div class="hud-box hud-info">
       <div id="hud-pos">–</div>
       <div id="hud-tiles">–</div>
       <div id="hud-speed">–</div>
@@ -171,11 +186,111 @@
   </div>
 </main>
 
-<!-- ======================= FILE BROWSER MODAL ======================= -->
+<!-- ======================= START SCREEN ======================= -->
+<div id="start-overlay" class="overlay hidden">
+  <div class="start-card">
+    <div class="brand big">
+      <span class="brand-dot"></span>
+      <h1>TerrainTile</h1>
+    </div>
+    <p class="muted">Prosedyregenerert øyverden med sculpting, teksturering og meshes.</p>
+    <div class="start-buttons">
+      <button id="start-new" class="btn primary big">Nytt prosjekt</button>
+      <button id="start-open" class="btn big">Åpne prosjekt</button>
+      <button id="start-continue" class="btn big hidden">Fortsett siste prosjekt</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= NEW PROJECT DIALOG ======================= -->
+<div id="dialog" class="overlay hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>Nytt prosjekt</h2>
+      <button id="dlg-close" class="btn small">✕</button>
+    </div>
+
+    <label class="field">
+      <span>Prosjektmappe</span>
+      <div class="row">
+        <button id="dlg-folder" class="btn">Velg mappe…</button>
+        <span id="dlg-folder-path" class="hint"></span>
+      </div>
+    </label>
+
+    <label class="field">
+      <span>Størrelse på øya</span>
+      <select id="dlg-island">
+        <option value="100">100 km² (rask test)</option>
+        <option value="300">300 km²</option>
+        <option value="500" selected>500 km² (standard)</option>
+        <option value="1000">1000 km²</option>
+        <option value="2000">2000 km²</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Hav rundt øya</span>
+      <select id="dlg-margin">
+        <option value="20000">2 mil</option>
+        <option value="30000">3 mil</option>
+        <option value="50000" selected>5 mil (standard)</option>
+        <option value="80000">8 mil</option>
+        <option value="100000">10 mil</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Flisstørrelse</span>
+      <select id="dlg-tile">
+        <option value="512">512 m</option>
+        <option value="1024" selected>1024 m</option>
+        <option value="2048">2048 m</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Oppløsning (meter per høydepunkt)</span>
+      <select id="dlg-res">
+        <option value="2">2 m (mest detalj)</option>
+        <option value="4" selected>4 m (standard)</option>
+        <option value="8">8 m (rask)</option>
+        <option value="16">16 m (forhåndsvisning)</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>LOD-nivåer</span>
+      <select id="dlg-lods">
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6" selected>6</option>
+        <option value="7">7</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Seed</span>
+      <div class="row">
+        <input type="number" id="dlg-seed" min="0" step="1">
+        <button id="dlg-random" class="btn">Tilfeldig</button>
+      </div>
+    </label>
+
+    <div id="dlg-estimate" class="info-box"></div>
+
+    <div class="modal-foot">
+      <span class="hint">Én stor øy med flatt lavland, platåer og gigantisk strand.</span>
+      <button id="dlg-create" class="btn primary" disabled>Generer verden</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= FOLDER BROWSER MODAL ======================= -->
 <div id="modal" class="modal hidden">
   <div class="modal-card">
     <div class="modal-head">
-      <h2 id="modal-title">Velg</h2>
+      <h2 id="modal-title">Velg mappe</h2>
       <button id="modal-close" class="btn small">✕</button>
     </div>
     <div class="modal-path-row">
@@ -184,8 +299,8 @@
     </div>
     <div id="modal-list" class="modal-list"></div>
     <div class="modal-foot">
-      <span id="modal-selection" class="hint"></span>
-      <button id="modal-choose" class="btn primary">Velg</button>
+      <span class="hint">Innholdet i valgt mappe brukes.</span>
+      <button id="modal-choose" class="btn primary">Velg denne mappen</button>
     </div>
   </div>
 </div>

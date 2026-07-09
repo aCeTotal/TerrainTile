@@ -42,14 +42,11 @@ pub struct TileMeta {
     /// [easting, northing, height] of the tile center.
     pub center: [f64; 3],
     pub neighbors: Neighbors,
+    /// Pure open sea: minimal quad meshes, no mask/class files.
+    #[serde(default)]
+    pub flat: bool,
     pub lods: Vec<LodEntry>,
     pub masks: BTreeMap<String, String>,
-    pub textures: BTreeMap<String, String>,
-    pub had_nodata: bool,
-    /// Nodata-fill algorithm version the tile was built with; tiles with
-    /// `had_nodata` and an older version are rebuilt (see import::fill).
-    #[serde(default)]
-    pub fill_version: u32,
     /// Build fingerprints for incremental rebuilds; empty in old datasets,
     /// which simply forces a rebuild once.
     #[serde(default)]

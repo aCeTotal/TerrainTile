@@ -1,14 +1,41 @@
 # TerrainTile
 
-Headless terrain pipeline for Bevy with a web UI. Reads Norwegian height
-data (GeoTIFF, e.g. hoydedata.no), fetches orthophotos (Norge i bilder WMS
-or any XYZ server), and produces a streamable tile dataset: crack-free LOD
-meshes, material masks, vegetation densities, metadata and a quadtree.
+Procedural island-world editor with a web UI. The server generates one
+giant, Florida/Palm Beach-style island — flat buildable lowland, terraced
+plateaus, a realistic domain-warped coastline and a huge, gently sloping
+beach — surrounded by an adjustable sea margin (default 5 mil = 50 km on
+every side). The world is cut into a streamable tile dataset: crack-free
+LOD meshes, per-tile class textures and a quadtree. Pure-sea tiles are
+stored as tiny flat quads, so even a 1000 km² island with 50 km of ocean
+stays manageable on disk.
 
-Runs as a server (e.g. on NixOS); everything is controlled from the
-browser: configuration, live progress/log, and — when the job is done — a
-3D viewer where you fly around the generated terrain (WASD + mouse,
-distance-based LOD streaming straight from the tile dataset).
+The browser is both viewer and editor, with four modes (keys 1–4, Tab
+toggles flying):
+
+- **Sculpt** — raise / lower / flatten / smooth brushes on the terrain.
+- **Texture** — user-defined **material classes**: create any number of
+  classes, upload PBR materials to them (.zip or loose
+  Color/Normal/Roughness maps, ambientCG-style), control each material's
+  visibility/blend mode and the class's min/max terrain slope and height
+  gates, then paint coverage with a freehand lasso on the aerial view.
+  Adjacent classes blend softly by default; classes marked "sharp" (grass
+  vs rock) get crisp edges.
+- **Mesh** — upload GLB models, click-place with a move/rotate/scale gizmo
+  (always snapped to the ground), click-out roads as smooth splines (the
+  strip is flattened with a slope-limited profile and the road class
+  painted under it), lasso **scatter areas** (density, spacing, random
+  rotation/size — expanded deterministically, so Bevy regenerates the
+  exact same forest), and a **Tilpass terreng** button that re-blends
+  roads into the terrain and re-snaps every placed mesh.
+- **Tomt og bygninger** — plots (numbered quads with individually
+  draggable corners) and building zones typed as garasje / enebolig /
+  blokk / skyskraper / bybygning / custom, with floors and rotation.
+  Editor-only markings: players never see them; everything is exported to
+  `plots.json` for Bevy and the game server (purchase/build logic).
+
+Texture, Mesh and Tomt all share the **aerial view** ("flyfoto"): a
+top-down orthographic view of the whole world with pan/zoom and freehand
+lasso drawing (key F).
 
 ```sh
 nix run                      # serves http://0.0.0.0:8080
@@ -18,74 +45,68 @@ nix run . -- --port 9000     # custom port
 The frontend is embedded in the binary; the browser loads Three.js from a
 CDN, so the *client* machine needs internet access for the 3D view.
 
-## Web UI
+## Workflow
 
-- **Pipeline** — pick height data and output dir with the built-in
-  server-side file browser, tune tiles/LOD/orthophoto/masks, start the job
-  and watch stage messages, per-tile progress, rate/ETA and warnings live
-  (SSE). Interrupted or reconfigured runs resume incrementally as before.
-- **3D-visning** — renders the *entire* dataset: a far layer draws every
-  tile at coarse LOD in a single `BatchedMesh` draw call (served
-  pre-concatenated as `/data/far.bin`, subsampled server-side to a ~2M
-  vertex budget) textured with a server-built overview mosaic of all
-  orthophotos (`/data/overview.png`); near the camera, individual tiles
-  stream in at distance-based LOD with full-res `ortho.png`, and the
-  coarse instances underneath are hidden (no z-fighting). Click the canvas
-  to fly: **WASD** move, **Q/E** down/up, **Shift** boost, mouse wheel
-  adjusts speed.
+Opening the page shows **Nytt prosjekt / Åpne prosjekt**. A new project
+asks for island size (km²), sea margin (mil), tile size, resolution and a
+seed, shows a live tile/disk estimate, then generates the world
+(parallel, incremental, resumable — SSE progress in the browser). Fresh
+projects get default classes (vann, sand, gress, jord, fjell, vei) with
+the embedded PBR sets installed. Opening an existing folder restores
+everything: world parameters, sculpted terrain, classes and painted
+coverage, placed models, scatter areas, roads, plots and zones.
 
-## Pipeline
+The viewer streams the world with a whole-terrain BatchedMesh far layer
+plus ONE sea plane (flat tiles are never streamed); near tiles get
+distance-based LOD, and the nearest ones a full PBR shader driven by
+texture arrays (one layer per uploaded material, stochastic anti-tiling)
+sampling the tile's top-4 class weights. The far/cheap layers follow the
+painting through a server-baked `overview.png`. Adaptive quality steers
+pixel ratio, shadows and rich-tile count toward a **10 ms frame budget**
+(100 fps where the display allows; rAF is vsync-capped).
 
-1. **Import** — pick a folder, files or a hoydedata.no **zip** directly.
-   Zip metadata is scanned in place via GDAL `/vsizip/` (no extraction, no
-   RAM); at run start the rasters are streamed out to `out/source/` once
-   (resume-aware). CRS is auto-detected; all files must share CRS,
-   resolution and sit on the same global pixel grid — checked up front so
-   tiles are guaranteed to fit 100% at their seams. Files are mosaicked
-   with a GDAL VRT; nothing is ever loaded fully into RAM (windowed reads
-   per tile, streaming writes).
-2. **Tiling** — choose tile size (256–2048 m) and LOD count. Tiles are cut
-   on a fixed grid with a shared-edge apron: neighboring tiles sample the
-   same source pixels, so edge vertices and normals are bitwise identical —
-   no cracks, verified by the validation pass.
-3. **Orthophoto** — per tile, the exact bbox is requested from Norge i
-   bilder WMS in the dataset CRS (pixel centers land exactly on the vertex
-   grid), or sampled bilinearly from an XYZ WebMercator server. Everything
-   is disk-cached under `out/cache/`.
-4. **Masks** — per-pixel classification combining photo (greenness,
-   brightness, saturation, local texture) and DTM (slope, height):
-   grass, forest, rock, dirt, sand, snow, water, road — normalized to sum
-   255 so a shader can blend materials directly. Tree/bush densities are
-   separate unnormalized layers for instancing.
-5. **Incremental builds** — every tile records two fingerprints: one over
-   everything its meshes depend on (source data, grid, LODs, nodata) and
-   one for its masks (thresholds, ortho source). A rerun rebuilds only
-   outputs whose inputs changed: new mask thresholds regenerate masks
-   without touching meshes; nothing changed means nothing is rebuilt.
-   `metadata.json` is written last (atomic rename), so an interrupted run
-   resumes where it stopped.
-6. **Validation** — all files present, metadata complete, and neighboring
-   LOD0 edges bitwise equal.
+## How it stays seamless
+
+Terrain height is a pure function of (seed, global sample coordinate):
+domain-warped FBM shaped by a superellipse coast and a terrace operator.
+Every edit lives in the same global-coordinate domain — `delta_h.bin`
+(f32 height deltas with global sample ownership) and per-tile class
+coverage PNGs on a global 8 m grid — so neighboring tiles always read
+identical values along shared edges; class weights are composited over an
+apron-padded grid and blurred BEFORE cropping. The validation pass proves
+edge vertices bitwise identical. Sea level is exactly 0.
+
+Edits go to the server (`/api/edit/height`, `/api/classes/paint`,
+`/api/edit/spline`, `/api/edit/conform`), which updates the overlays,
+rebuilds affected tiles in the background and pushes SSE events; the
+client previews sculpting locally in the meantime. Incremental
+fingerprints (world + class defs + per-tile overlay hashes, own and
+neighboring) mean a rerun only rebuilds what actually changed.
 
 ## Output layout
 
 ```
 out/
-├── dataset.json          # CRS, origin, resolution, grid dims, height range
-├── quadtree.json         # precomputed LOD quadtree over the tile grid
-├── mosaic.vrt
+├── project.json          # world, classes, placements, splines, scatter,
+│                         # plots, zones, zone_types
+├── plots.json            # Bevy-facing plots/zones export
+├── scatter.json          # deterministic scatter instances
+├── dataset.json          # grid dims, height range, flat-tile bitset
+├── quadtree.json
+├── assets/               # uploaded GLB models
+├── materials/<class>/<name>/{color,normal,rough}.png   # 1K PBR maps
+├── classes/<class>/tile_x{X}_y{Y}.png                  # painted coverage
 └── tiles/tile_x{X}_y{Y}/
-    ├── mesh_lod0.bin … mesh_lod{N}.bin
-    ├── mask_grass.png … mask_road.png     # material weights, sum=255
-    ├── mask_veg_trees.png, mask_veg_bushes.png
-    ├── ortho.png
-    └── metadata.json     # bbox, min/max height, avg slope/normal,
-                          # center, neighbors, LOD + mask file lists
+    ├── mesh_lod0.bin … mesh_lod{N}.bin   # TTM1 (flat sea: 4-vertex quad)
+    ├── class.bin                         # TTC1: top-4 class idx + weights
+    ├── class_<id>.png                    # per-class gray weights (Bevy)
+    ├── delta_h.bin                       # sculpt overlay (if edited)
+    └── metadata.json
 ```
 
-## mesh.bin format (`TTM1`)
+## Binary formats
 
-Little-endian, GPU-ready:
+`TTM1` mesh (little-endian, GPU-ready):
 
 ```
 magic   [u8;4] = "TTM1"
@@ -98,55 +119,28 @@ f32*4*N tangents    xyzw
 u32*M   indices     triangle list, CCW from above
 ```
 
-## Using in Bevy
+`TTC1` class splat:
 
-World placement from `metadata.json`: pick a scene origin `(E0, N0)` (e.g.
-`dataset.json.origin`), then spawn each tile at
-`Vec3::new(bbox.west - E0, 0.0, N0 - bbox.north)`.
-
-```rust
-fn load_ttm(bytes: &[u8]) -> Mesh {
-    let vc = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let ic = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-    let f = |o: usize, n: usize| -> Vec<f32> {
-        bytes[o..o + n * 4].chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect()
-    };
-    let mut o = 12;
-    let pos = f(o, vc * 3); o += vc * 12;
-    let nrm = f(o, vc * 3); o += vc * 12;
-    let uv  = f(o, vc * 2); o += vc * 8;
-    let tan = f(o, vc * 4); o += vc * 16;
-    let idx: Vec<u32> = bytes[o..o + ic * 4].chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,
-        pos.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect::<Vec<_>>());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL,
-        nrm.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect::<Vec<_>>());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0,
-        uv.chunks_exact(2).map(|c| [c[0], c[1]]).collect::<Vec<_>>());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT,
-        tan.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect::<Vec<_>>());
-    mesh.insert_indices(Indices::U32(idx));
-    mesh
-}
+```
+magic  [u8;4] = "TTC1"
+u32    size            vertex grid edge (n+1)
+u8*4*size²  top-4 class indices per sample
+u8*4*size²  matching weights, sum 255
 ```
 
-Material blending: sample the mask PNGs in a custom shader and mix your PBR
-materials by weight — geometry and masks stay fixed while materials remain
-swappable.
+## Using in Bevy
 
-## Norge i bilder
-
-The WMS (`wms.geonorge.no/skwms1/wms.nib`) requires a BAAT ticket from
-Geonorge. Paste the full URL including `LAYERS=ortofoto&ticket=...` in the
-web UI. Without access, the XYZ fallback (ESRI World Imagery) works unauthenticated.
+Spawn each tile at `Vec3::new(bbox.west, 0.0, world_size - bbox.north)`;
+parse TTM1 as in earlier revisions of this README (positions/normals/uvs/
+tangents/indices, all little-endian). Blend materials by sampling
+`class_<id>.png` (or `class.bin`) against the class definitions in
+`project.json`. `scatter.json` and `plots.json` are plain JSON with world
+coordinates in meters.
 
 ## Memory
 
-Designed for big datasets on small machines: windowed VRT reads, meshes
-streamed to disk without vertex buffers in RAM, u8 masks/ortho, row-wise
-coordinate transforms. Per-worker RAM is bounded by tile size (~25 MB at
-1024 m / 1 m); the thread slider caps workers.
+Designed for big worlds on small machines: heights are generated (and
+composited with edit overlays) per tile window — no whole-world buffers
+ever exist in RAM. Painted coverage is tiled and sparse (only painted
+tiles have files) with an LRU cache. Pure-sea tiles cost bytes. Meshes
+stream to disk without vertex buffers in RAM.

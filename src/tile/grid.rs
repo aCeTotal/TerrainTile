@@ -1,8 +1,6 @@
 use anyhow::{bail, Result};
 
-use crate::import::dataset::DatasetInfo;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct TileId {
     pub x: usize,
     pub y: usize,
@@ -30,39 +28,37 @@ pub struct TileGrid {
 }
 
 impl TileGrid {
-    pub fn new(info: &DatasetInfo, tile_size_m: f64, lods: usize) -> Result<Self> {
-        let n_f = tile_size_m / info.resolution;
+    pub fn new(
+        resolution: f64,
+        width_px: usize,
+        height_px: usize,
+        origin: (f64, f64),
+        tile_size_m: f64,
+        lods: usize,
+    ) -> Result<Self> {
+        if lods == 0 || lods > 8 {
+            bail!("antall LOD-nivåer må være 1–8");
+        }
+        let n_f = tile_size_m / resolution;
         let n = n_f.round() as usize;
         if n == 0 || (n_f - n as f64).abs() > 1e-9 {
             bail!(
-                "flisstørrelse {tile_size_m} m er ikke et helt antall piksler ved {} m oppløsning",
-                info.resolution
+                "flisstørrelse {tile_size_m} m er ikke et helt antall piksler ved {resolution} m oppløsning"
             );
         }
         let max_stride = 1usize << (lods - 1);
-        if n % max_stride != 0 {
+        if !n.is_multiple_of(max_stride) {
             bail!(
                 "flisstørrelse {tile_size_m} m = {n} px må være delelig med {max_stride} (LOD{})",
                 lods - 1
             );
         }
-        let tiles_x = info.width_px / n;
-        let tiles_y = info.height_px / n;
+        let tiles_x = width_px / n;
+        let tiles_y = height_px / n;
         if tiles_x == 0 || tiles_y == 0 {
-            bail!(
-                "datasettet ({} x {} px) er mindre enn én flis ({n} px)",
-                info.width_px,
-                info.height_px
-            );
+            bail!("verdenen ({width_px} x {height_px} px) er mindre enn én flis ({n} px)");
         }
-        Ok(Self {
-            tiles_x,
-            tiles_y,
-            tile_px: n,
-            tile_size_m,
-            resolution: info.resolution,
-            origin: info.origin,
-        })
+        Ok(Self { tiles_x, tiles_y, tile_px: n, tile_size_m, resolution, origin })
     }
 
     pub fn count(&self) -> usize {

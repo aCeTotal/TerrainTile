@@ -40,16 +40,31 @@ pub async fn material(Path(name): Path<String>) -> Result<Response, StatusCode> 
         .into_response())
 }
 
-/// GET /js/{name} — the embedded JS modules.
+/// GET /js/{*path} — the embedded JS modules.
 pub async fn js(Path(name): Path<String>) -> Result<Response, StatusCode> {
     let body = match name.as_str() {
         "app.js" => include_str!("../../web/app.js"),
+        "start.js" => include_str!("../../web/start.js"),
+        "browse.js" => include_str!("../../web/browse.js"),
         "viewer.js" => include_str!("../../web/viewer.js"),
         "near.js" => include_str!("../../web/near.js"),
         "far.js" => include_str!("../../web/far.js"),
         "ttm.js" => include_str!("../../web/ttm.js"),
         "terrain-material.js" => include_str!("../../web/terrain-material.js"),
         "terrain-simple.js" => include_str!("../../web/terrain-simple.js"),
+        "editor/editor.js" => include_str!("../../web/editor/editor.js"),
+        "editor/toolbar.js" => include_str!("../../web/editor/toolbar.js"),
+        "editor/brush.js" => include_str!("../../web/editor/brush.js"),
+        "editor/sculpt.js" => include_str!("../../web/editor/sculpt.js"),
+        "editor/classes.js" => include_str!("../../web/editor/classes.js"),
+        "editor/meshes.js" => include_str!("../../web/editor/meshes.js"),
+        "editor/spline.js" => include_str!("../../web/editor/spline.js"),
+        "editor/aerial.js" => include_str!("../../web/editor/aerial.js"),
+        "editor/lasso.js" => include_str!("../../web/editor/lasso.js"),
+        "editor/overlay.js" => include_str!("../../web/editor/overlay.js"),
+        "editor/scatter.js" => include_str!("../../web/editor/scatter.js"),
+        "editor/ground.js" => include_str!("../../web/editor/ground.js"),
+        "editor/plots.js" => include_str!("../../web/editor/plots.js"),
         _ => return Err(StatusCode::NOT_FOUND),
     };
     Ok(([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], body).into_response())

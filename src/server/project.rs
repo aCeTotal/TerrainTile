@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -6,54 +6,145 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ortho::source::Provider;
+use crate::gen::world::WorldParams;
 use crate::pipeline::config::PipelineConfig;
 use crate::server::state::SharedState;
-use crate::tile::masks::MaskParams;
+use crate::tile::classdef::ClassDef;
 
-/// Run settings saved to `<output>/project.json` at every start, so the
-/// folder can be reopened later and the run continued (resume). Passwords
-/// are never stored.
+/// `<output>/project.json` — everything needed to reopen the project and
+/// regenerate or continue it, including material classes, placed meshes
+/// and roads.
 #[derive(Serialize, Deserialize)]
 pub struct ProjectFile {
-    pub inputs: Vec<PathBuf>,
-    pub tile_size_m: f64,
-    pub overlap: bool,
-    pub lods: usize,
-    pub threads: usize,
-    pub nodata_height: f32,
-    pub masks: MaskParams,
-    pub ortho: Option<OrthoSaved>,
+    pub version: u32,
+    pub world: WorldParams,
+    #[serde(default)]
+    pub classes: Vec<ClassDef>,
+    #[serde(default)]
+    pub placements: Vec<Placement>,
+    #[serde(default)]
+    pub splines: Vec<Spline>,
+    #[serde(default)]
+    pub scatter: Vec<crate::edit::scatter::ScatterArea>,
+    #[serde(default)]
+    pub plots: Vec<Plot>,
+    #[serde(default)]
+    pub zones: Vec<Zone>,
+    #[serde(default)]
+    pub zone_types: Vec<ZoneType>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum OrthoSaved {
-    Nib { username: String },
-    Wms { url: String },
-    Xyz { url: String, zoom: u8 },
+/// A purchasable plot: a quad with individually adjustable corners.
+/// Editor/server/Bevy data only — never rendered for players.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Plot {
+    pub id: String,
+    pub number: u32,
+    pub corners: [[f64; 2]; 4],
 }
 
-pub fn save(cfg: &PipelineConfig, inputs: &[PathBuf]) -> anyhow::Result<()> {
+/// A building footprint: Bevy extrudes the quad following its type's
+/// template when the building is generated.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Zone {
+    pub id: String,
+    /// Owning plot, when placed inside one.
+    #[serde(default)]
+    pub plot: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub corners: [[f64; 2]; 4],
+    #[serde(default = "one_floor")]
+    pub floors: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ZoneType {
+    pub name: String,
+    pub color: String,
+    #[serde(default = "one_floor")]
+    pub floors: u32,
+}
+
+fn one_floor() -> u32 {
+    1
+}
+
+/// A placed GLB instance (asset path is relative to the output dir).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Placement {
+    pub id: String,
+    pub asset: String,
+    pub pos: [f64; 3],
+    pub rot_y: f64,
+    pub scale: f64,
+}
+
+/// A committed drag-stroke (roads etc.), dense polyline in world meters.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Spline {
+    pub id: String,
+    pub kind: String,
+    pub width: f64,
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Save world/classes, preserving placements and splines already on disk.
+pub fn save(cfg: &PipelineConfig) -> anyhow::Result<()> {
+    let old = load(&cfg.output);
     let p = ProjectFile {
-        inputs: inputs.to_vec(),
-        tile_size_m: cfg.tile_size_m,
-        overlap: cfg.overlap,
-        lods: cfg.lods,
-        threads: cfg.threads,
-        nodata_height: cfg.nodata_height,
-        masks: cfg.masks,
-        ortho: cfg.ortho.as_ref().map(|o| match &o.provider {
-            Provider::Nib { username, .. } => OrthoSaved::Nib { username: username.clone() },
-            Provider::Wms { base_url } => OrthoSaved::Wms { url: base_url.clone() },
-            Provider::Xyz { url_template, zoom } => {
-                OrthoSaved::Xyz { url: url_template.clone(), zoom: *zoom }
-            }
-        }),
+        version: 3,
+        world: cfg.world,
+        classes: cfg.classes.clone(),
+        placements: old.as_ref().map(|o| o.placements.clone()).unwrap_or_default(),
+        splines: old.as_ref().map(|o| o.splines.clone()).unwrap_or_default(),
+        scatter: old.as_ref().map(|o| o.scatter.clone()).unwrap_or_default(),
+        plots: old.as_ref().map(|o| o.plots.clone()).unwrap_or_default(),
+        zones: old.as_ref().map(|o| o.zones.clone()).unwrap_or_default(),
+        zone_types: old.map(|o| o.zone_types).unwrap_or_default(),
     };
-    std::fs::create_dir_all(&cfg.output)?;
-    std::fs::write(cfg.output.join("project.json"), serde_json::to_vec_pretty(&p)?)?;
+    write(&cfg.output, &p)
+}
+
+pub fn load(output: &Path) -> Option<ProjectFile> {
+    let bytes = std::fs::read(output.join("project.json")).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write(output: &Path, p: &ProjectFile) -> anyhow::Result<()> {
+    std::fs::create_dir_all(output)?;
+    let path = output.join("project.json");
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(p)?)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(())
+}
+
+/// Load-modify-write on the open project's file.
+pub fn update(output: &Path, f: impl FnOnce(&mut ProjectFile)) -> anyhow::Result<()> {
+    let mut p = load(output).ok_or_else(|| anyhow::anyhow!("project.json mangler"))?;
+    f(&mut p);
+    write(output, &p)
+}
+
+#[derive(Deserialize)]
+pub struct PlacementsBody {
+    placements: Vec<Placement>,
+}
+
+/// PUT /api/placements — replace the whole placement list (it is small and
+/// the client debounces).
+pub async fn save_placements(
+    State(state): State<SharedState>,
+    Json(body): Json<PlacementsBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let output = state.inner.lock().unwrap().output.clone();
+    let Some(output) = output else {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "ingen prosjekt åpnet" }))));
+    };
+    update(&output, |p| p.placements = body.placements)
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{e:#}") }))))?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
@@ -63,16 +154,14 @@ pub struct OpenBody {
 
 /// POST /api/open — open an existing project folder: point the server's
 /// output at it (the viewer serves from there immediately) and return the
-/// saved settings so the UI can prefill the form and continue the run.
+/// saved settings.
 pub async fn open(
     State(state): State<SharedState>,
     Json(body): Json<OpenBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let bad = |msg: &str| (StatusCode::BAD_REQUEST, Json(json!({ "error": msg })));
     let path = PathBuf::from(body.path.trim());
-    let project = std::fs::read(path.join("project.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<ProjectFile>(&b).ok());
+    let project = load(&path);
     let has_dataset = path.join("dataset.json").is_file();
     if project.is_none() && !has_dataset {
         return Err(bad("mappen har verken project.json eller dataset.json"));
@@ -83,12 +172,13 @@ pub async fn open(
             return Err(bad("en jobb kjører — kan ikke bytte prosjekt nå"));
         }
         inner.output = Some(path.clone());
+        inner.edit = None; // rebuild worker exits when its channel drops
         inner.snapshot.output = Some(path.display().to_string());
         inner.snapshot.report = None;
     }
     Ok(Json(json!({
         "output": path.display().to_string(),
         "has_dataset": has_dataset,
-        "config": project,
+        "project": project,
     })))
 }

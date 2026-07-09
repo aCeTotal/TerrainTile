@@ -6,13 +6,10 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ortho::source::{OrthoSource, Provider, DEFAULT_NIB_WMS, DEFAULT_XYZ};
+use crate::gen::world::WorldParams;
 use crate::pipeline::config::PipelineConfig;
-use crate::server::inspect;
-use crate::server::run;
 use crate::server::state::SharedState;
-use crate::tile::grid::TileGrid;
-use crate::tile::masks::MaskParams;
+use crate::server::{classes, project, run};
 
 type ApiError = (StatusCode, Json<Value>);
 
@@ -20,7 +17,7 @@ fn bad(msg: impl std::fmt::Display) -> ApiError {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": msg.to_string() })))
 }
 
-/// GET /api/status — full snapshot + defaults for the config form.
+/// GET /api/status — full snapshot + defaults for the new-project dialog.
 pub async fn status(State(state): State<SharedState>) -> Json<Value> {
     let inner = state.inner.lock().unwrap();
     let has_dataset = inner
@@ -31,9 +28,7 @@ pub async fn status(State(state): State<SharedState>) -> Json<Value> {
         "snapshot": inner.snapshot,
         "has_dataset": has_dataset,
         "defaults": {
-            "wms_url": DEFAULT_NIB_WMS,
-            "xyz_url": DEFAULT_XYZ,
-            "masks": MaskParams::default(),
+            "world": WorldParams::default(),
             "home": std::env::var("HOME").unwrap_or_else(|_| "/".into()),
         },
     }))
@@ -51,8 +46,7 @@ struct BrowseEntry {
 }
 
 /// GET /api/browse?path= — server-side directory listing so the browser can
-/// pick input/output paths on the machine the pipeline runs on. Shows
-/// directories plus raster/zip files.
+/// pick the project folder on the machine the server runs on.
 pub async fn browse(Query(q): Query<BrowseQuery>) -> Result<Json<Value>, ApiError> {
     let path = PathBuf::from(
         q.path.unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into())),
@@ -65,17 +59,11 @@ pub async fn browse(Query(q): Query<BrowseQuery>) -> Result<Json<Value>, ApiErro
         if name.starts_with('.') {
             continue;
         }
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let keep = is_dir
-            || matches!(
-                name.rsplit('.').next().map(str::to_lowercase).as_deref(),
-                Some("tif") | Some("tiff") | Some("zip")
-            );
-        if keep {
-            entries.push(BrowseEntry { name, dir: is_dir });
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            entries.push(BrowseEntry { name, dir: true });
         }
     }
-    entries.sort_by(|a, b| b.dir.cmp(&a.dir).then(a.name.cmp(&b.name)));
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(json!({
         "path": path.display().to_string(),
         "parent": path.parent().map(|p| p.display().to_string()),
@@ -84,117 +72,53 @@ pub async fn browse(Query(q): Query<BrowseQuery>) -> Result<Json<Value>, ApiErro
 }
 
 #[derive(Deserialize)]
-pub struct ScanBody {
-    paths: Vec<String>,
+pub struct NewProjectBody {
+    output: String,
+    world: WorldParams,
+    #[serde(default)]
+    threads: usize,
+    #[serde(default)]
+    force: bool,
 }
 
-/// POST /api/scan — inspect the chosen height data. GDAL work runs on a
-/// blocking thread; big datasets take time and must not stall the server.
-pub async fn scan(
+/// POST /api/project/new — validate world params and start generation.
+/// Also used to regenerate/continue an opened project. Fresh projects get
+/// the default material classes and the embedded PBR sets installed.
+pub async fn project_new(
     State(state): State<SharedState>,
-    Json(body): Json<ScanBody>,
+    Json(body): Json<NewProjectBody>,
 ) -> Result<Json<Value>, ApiError> {
-    if body.paths.is_empty() {
-        return Err(bad("ingen filer valgt"));
+    if body.output.trim().is_empty() {
+        return Err(bad("velg prosjektmappe først"));
     }
-    let paths: Vec<PathBuf> = body.paths.iter().map(PathBuf::from).collect();
-    let paths2 = paths.clone();
-    let result = tokio::task::spawn_blocking(move || inspect::inspect(&paths2))
-        .await
-        .map_err(|e| bad(format!("skanning feilet: {e}")))?
-        .map_err(|e| bad(format!("{e:#}")))?;
-
-    let dto = result.dto();
-    let mut inner = state.inner.lock().unwrap();
-    inner.scanned = match result {
-        inspect::Inspect::Full(info) => Some((paths, info)),
-        inspect::Inspect::Zip { .. } => None,
+    body.world.validate().map_err(|e| bad(format!("{e:#}")))?;
+    let grid = body.world.grid().map_err(|e| bad(format!("{e:#}")))?;
+    let output = PathBuf::from(body.output.trim());
+    let class_list = match project::load(&output) {
+        Some(p) if !p.classes.is_empty() => p.classes,
+        _ => {
+            let out = output.clone();
+            tokio::task::spawn_blocking(move || classes::install_defaults(&out))
+                .await
+                .map_err(bad)?
+                .map_err(|e| bad(format!("{e:#}")))?
+        }
     };
-    Ok(Json(serde_json::to_value(dto).unwrap()))
-}
-
-#[derive(Deserialize)]
-pub struct GridQuery {
-    tile_size_m: f64,
-    lods: usize,
-}
-
-/// GET /api/grid — tile grid preview for the last scanned (non-zip) input.
-pub async fn grid(
-    State(state): State<SharedState>,
-    Query(q): Query<GridQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let inner = state.inner.lock().unwrap();
-    let Some((_, info)) = &inner.scanned else {
-        return Err(bad("ingen skannet høydedata"));
+    let cfg = PipelineConfig {
+        output,
+        world: body.world,
+        threads: body.threads,
+        force: body.force,
+        classes: class_list,
     };
-    let grid = TileGrid::new(info, q.tile_size_m, q.lods).map_err(|e| bad(format!("{e:#}")))?;
+    run::start(&state, cfg).map_err(bad)?;
     Ok(Json(json!({
+        "ok": true,
         "tiles_x": grid.tiles_x,
         "tiles_y": grid.tiles_y,
         "count": grid.count(),
         "tile_px": grid.tile_px,
     })))
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum OrthoDto {
-    Nib { username: String, password: String },
-    Wms { url: String },
-    Xyz { url: String, zoom: u8 },
-}
-
-#[derive(Deserialize)]
-pub struct StartBody {
-    inputs: Vec<String>,
-    output: String,
-    tile_size_m: f64,
-    overlap: bool,
-    lods: usize,
-    threads: usize,
-    nodata_height: f32,
-    force: bool,
-    masks: MaskParams,
-    ortho: Option<OrthoDto>,
-}
-
-/// POST /api/start — start the pipeline.
-pub async fn start(
-    State(state): State<SharedState>,
-    Json(body): Json<StartBody>,
-) -> Result<Json<Value>, ApiError> {
-    if body.inputs.is_empty() {
-        return Err(bad("velg høydedata først"));
-    }
-    if body.output.trim().is_empty() {
-        return Err(bad("velg utmappe først"));
-    }
-    let output = PathBuf::from(body.output.trim());
-    let cfg = PipelineConfig {
-        output: output.clone(),
-        tile_size_m: body.tile_size_m,
-        overlap: body.overlap,
-        lods: body.lods.clamp(1, 8),
-        threads: body.threads,
-        nodata_height: body.nodata_height,
-        force: body.force,
-        masks: body.masks,
-        ortho: body.ortho.map(|o| OrthoSource {
-            provider: match o {
-                OrthoDto::Nib { username, password } => Provider::Nib {
-                    username: username.trim().to_string(),
-                    password,
-                },
-                OrthoDto::Wms { url } => Provider::Wms { base_url: url },
-                OrthoDto::Xyz { url, zoom } => Provider::Xyz { url_template: url, zoom },
-            },
-            cache_dir: output.join("cache"),
-        }),
-    };
-    let inputs = body.inputs.iter().map(PathBuf::from).collect();
-    run::start(&state, cfg, inputs).map_err(bad)?;
-    Ok(Json(json!({ "ok": true })))
 }
 
 /// POST /api/cancel — request cancellation of the active run.

@@ -61,22 +61,13 @@ h3 { font-size: .9rem; margin: 1rem 0 .5rem; color: var(--muted); }
 .pill.error { background: #3c1212; color: var(--red); }
 @keyframes pulse { 50% { opacity: .55; } }
 
-/* ---------- pipeline layout ---------- */
-.pipeline {
-  display: grid;
-  grid-template-columns: minmax(340px, 440px) 1fr;
-  gap: 1rem;
+/* ---------- project layout ---------- */
+.project {
   padding: 1rem 1.2rem 2rem;
-  max-width: 1500px;
+  max-width: 900px;
   margin: 0 auto;
 }
 .col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-.col.progress { position: sticky; top: 4rem; align-self: start; max-height: calc(100vh - 5rem); }
-
-@media (max-width: 900px) {
-  .pipeline { grid-template-columns: 1fr; }
-  .col.progress { position: static; max-height: none; }
-}
 
 .card {
   background: var(--panel);
@@ -145,7 +136,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .info-box { background: #12263c; border: 1px solid #1d3c5e; }
 .error-box { background: #3c1212; border: 1px solid #5e1d1d; color: #ffb3b3; white-space: pre-wrap; }
 
-.ortho-fields { margin: .5rem 0 0 1.6rem; }
+/* ---------- start screen + dialogs ---------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(8, 10, 14, .8);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+}
+.start-card {
+  display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  text-align: center; padding: 2.5rem 3rem;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.brand.big h1 { font-size: 1.6rem; }
+.brand.big .brand-dot { width: 18px; height: 18px; border-radius: 6px; }
+.start-buttons { display: flex; flex-direction: column; gap: .6rem; width: 260px; margin-top: .5rem; }
+.btn.big { padding: .8rem 1rem; font-size: 1rem; }
+#dlg-folder-path { align-self: center; word-break: break-all; margin: 0; }
 
 /* ---------- progress ---------- */
 .status { font-weight: 600; margin-bottom: .8rem; min-height: 1.3em; }
@@ -199,8 +209,48 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
   border: 1px solid var(--border); border-radius: 10px;
   padding: .55rem .8rem; font-size: .8rem; line-height: 1.6;
 }
-.hud-box:first-child { top: .8rem; left: .8rem; font-family: ui-monospace, monospace; }
+.hud-info { top: .8rem; left: .8rem; font-family: ui-monospace, monospace; }
 .hud-controls { top: .8rem; right: .8rem; width: 220px; }
+
+/* ---------- editor toolbar ---------- */
+.toolbar {
+  top: .8rem; left: 50%; transform: translateX(-50%);
+  display: flex; gap: .3rem; padding: .35rem;
+}
+.tbtn {
+  background: none; border: none; color: var(--muted);
+  padding: .4rem .8rem; border-radius: 7px; cursor: pointer;
+  font: inherit; font-weight: 500; white-space: nowrap;
+}
+.tbtn:hover { color: var(--text); background: var(--panel-2); }
+.tbtn.active { color: #fff; background: var(--accent-2); }
+.tbtn.small { padding: .3rem .55rem; font-size: .82rem; }
+.tbtn kbd {
+  font-size: .7rem; opacity: .7; border: 1px solid var(--border);
+  border-radius: 4px; padding: 0 .25rem; margin-left: .15rem;
+}
+.tool-panel { top: 4rem; left: 50%; transform: translateX(-50%); width: 280px; }
+.tool-panel.wide { width: 420px; max-height: 70vh; overflow-y: auto; }
+.class-list { margin: .5rem 0; max-height: 140px; overflow-y: auto; }
+.class-item {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .25rem .5rem; border-radius: 6px; cursor: pointer; font-size: .85rem;
+}
+.class-item:hover { background: rgba(77, 163, 255, .08); }
+.class-item.selected { background: rgba(77, 163, 255, .18); }
+.class-item .swatch { width: 14px; height: 14px; border-radius: 4px; }
+.mat-list { margin: .5rem 0; }
+.mat-item {
+  display: flex; align-items: center; gap: .4rem; font-size: .8rem;
+  padding: .2rem 0;
+}
+.mat-item input[type="range"] { flex: 1; }
+.tool-panel .row label { font-size: .75rem; }
+.tool-panel label { display: block; color: var(--muted); font-size: .78rem; margin-top: .5rem; }
+.tool-panel input[type="range"] { width: 100%; }
+.tool-panel select { width: 100%; margin-top: .2rem; }
+.tool-panel .row { display: flex; gap: .3rem; flex-wrap: wrap; }
+.tool-panel .hint { margin: .5rem 0 0; font-size: .72rem; }
 .hud-controls label { color: var(--muted); font-size: .75rem; }
 .hud-help {
   bottom: .8rem; left: 50%; transform: translateX(-50%);

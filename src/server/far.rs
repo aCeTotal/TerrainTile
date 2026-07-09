@@ -74,12 +74,16 @@ struct Ds {
     tile_px: usize,
     tiles_x: usize,
     tiles_y: usize,
+    #[serde(default)]
+    flat_count: usize,
 }
 
 fn build(root: &Path) -> Result<()> {
     let ds: Ds = serde_json::from_slice(&std::fs::read(root.join("dataset.json"))?)
         .context("dataset.json")?;
-    let count = ds.tiles_x * ds.tiles_y;
+    // Flat sea tiles are skipped (the viewer draws one sea plane instead),
+    // so the vertex budget goes to real terrain.
+    let count = (ds.tiles_x * ds.tiles_y).saturating_sub(ds.flat_count).max(1);
     // Finest LOD whose whole-dataset vertex count fits the budget — the
     // coarsest is often needlessly blocky for small datasets.
     let mut lod = ds.lods - 1;
@@ -121,6 +125,9 @@ fn build(root: &Path) -> Result<()> {
                 bail!("{}: feil magic", path.display());
             }
             let vc = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
+            if vc == 4 {
+                continue; // flat sea tile — the viewer's sea plane covers it
+            }
             if vc != src_v * src_v {
                 bail!("{}: {vc} vertekser, forventet {}", path.display(), src_v * src_v);
             }

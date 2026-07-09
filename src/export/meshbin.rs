@@ -65,6 +65,37 @@ pub fn write(path: &Path, geo: &LodGeometry) -> Result<()> {
     Ok(())
 }
 
+/// Minimal flat sea tile: a single quad at y = 0 covering the tile. Valid
+/// TTM1 (vc = 4), so viewers and validation parse it like any other mesh;
+/// pure-sea tiles cost bytes instead of megabytes.
+pub fn write_flat(path: &Path, tile_size_m: f64) -> Result<()> {
+    let t = tile_size_m as f32;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("kan ikke skrive {}", path.display()))?;
+    let mut w = BufWriter::new(file);
+    w.write_all(&MAGIC)?;
+    w.write_all(&4u32.to_le_bytes())?;
+    w.write_all(&6u32.to_le_bytes())?;
+    // Positions: row-major 2×2 grid (NW, NE, SW, SE) like LodGeometry.
+    for [x, z] in [[0.0, 0.0], [t, 0.0], [0.0, t], [t, t]] {
+        write_f32s(&mut w, &[x, 0.0, z])?;
+    }
+    for _ in 0..4 {
+        write_f32s(&mut w, &[0.0, 1.0, 0.0])?;
+    }
+    for uv in [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]] {
+        write_f32s(&mut w, &uv)?;
+    }
+    for _ in 0..4 {
+        write_f32s(&mut w, &[1.0, 0.0, 0.0, 1.0])?;
+    }
+    for idx in [0u32, 2, 1, 1, 2, 3] {
+        w.write_all(&idx.to_le_bytes())?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
 #[inline]
 fn write_f32s<W: Write>(w: &mut W, vals: &[f32]) -> std::io::Result<()> {
     for f in vals {
