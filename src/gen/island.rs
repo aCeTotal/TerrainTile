@@ -1,26 +1,17 @@
-//! One giant Florida / Palm Beach-style island centered in the world:
-//! mostly flat lowland with large usable plains, occasional terraced
-//! plateaus, a realistic domain-warped coastline all around, and a huge,
-//! gently sloping beach. Sea is exactly 0.0. Pure function of
-//! (params, global coordinate) — the crack-free seam guarantee.
+//! One giant island centered in the world with rounded, rolling relief —
+//! no mountains, smooth transitions, a flattened tread on top of every
+//! rise, and every inland slope gentle enough to carry a road straight up
+//! it. The domain-warped coastline meets the sea as a wide beach where the
+//! terrain is low and as a sheer cliff where it is high; craggy rock
+//! outcrops line the cliff edges.
+//! Sea is exactly 0.0. Pure function of (params, global coordinate) — the
+//! crack-free seam guarantee.
 //!
 //! Coordinates here are sample space: x east, y south from the world's NW
 //! corner, in meters.
 
 use crate::gen::noise;
 use crate::gen::world::WorldParams;
-
-/// Terrace operator: pulls heights toward flat steps of `step` meters.
-/// `sharp` > 1 flattens the treads and steepens the risers — this is what
-/// produces buildable plateaus.
-pub fn terrace(h: f32, step: f32, sharp: f32) -> f32 {
-    let t = h / step;
-    let base = t.floor();
-    let f = t - base;
-    let s = (f - 0.5) * 2.0;
-    let s = s.signum() * s.abs().powf(sharp);
-    (base + 0.5 + s * 0.5) * step
-}
 
 /// Signed distance to the coastline in meters, > 0 inland (radial
 /// approximation): a superellipse (rounded square) with bays and headlands
@@ -50,18 +41,37 @@ pub fn height_at(w: &WorldParams, x_m: f64, y_m: f64) -> f32 {
         return 0.0;
     }
     let s = w.seed;
-    // Palm Beach: a giant, gently sloping beach — 0 → 3 m over ~500 m.
-    let beach = 3.0 * smooth01((d / 500.0) as f32);
-    // Florida lowland: rolling plains 4–14 m, very low frequency = flat.
+
+    // Interior relief: rounded, low-frequency fields only. Amplitudes and
+    // wavelengths are chosen so the combined inland gradient stays below a
+    // road-worthy grade (~8 %) even through the domain warp. Every field is
+    // pushed through smooth01, whose zero derivative at both ends gives
+    // smooth valley floors and a flattened tread on top of every rise.
     let plains =
-        4.0 + 10.0 * (0.5 + 0.5 * noise::fbm(s ^ 1, wx / 12000.0, wy / 12000.0, 4, 2.0, 0.5));
-    // Occasional higher flat plateaus, hard-terraced (buildable treads).
-    let pmask = smooth(0.55, 0.72, noise::fbm(s ^ 2, wx / 20000.0, wy / 20000.0, 3, 2.0, 0.5));
-    let ph = 12.0 + 18.0 * (0.5 + 0.5 * noise::fbm(s ^ 3, wx / 9000.0, wy / 9000.0, 4, 2.0, 0.5));
-    let plateau = terrace(ph, 8.0, 3.5) * pmask;
-    // Interior ramps up over ~3 km from the coast.
-    let inland = smooth01((d / 3000.0) as f32);
-    (beach + inland * (plains + plateau)).max(0.0)
+        5.0 + 10.0 * (0.5 + 0.5 * noise::fbm(s ^ 1, wx / 9000.0, wy / 9000.0, 3, 2.0, 0.5));
+    let hills =
+        26.0 * smooth01((0.5 + 0.5 * noise::fbm(s ^ 6, wx / 3500.0, wy / 3500.0, 4, 2.0, 0.5)) / 0.8);
+    // Broad uplands: gentle swells that lift whole sectors of the island.
+    let swell = 24.0 * smooth(0.0, 0.6, noise::fbm(s ^ 2, wx / 15000.0, wy / 15000.0, 3, 2.0, 0.5));
+    let interior = plains + hills + swell;
+
+    // The coast profile is decided by the terrain height itself: low ground
+    // ramps into the sea as a wide beach, high ground is cut off as a sheer
+    // cliff dropping straight to the water.
+    let cliffy = smooth(20.0, 30.0, interior);
+    let ramp_beach = smooth01((d / 2000.0) as f32);
+    let ramp_cliff = smooth01((d / 45.0) as f32);
+    let ramp = ramp_beach + (ramp_cliff - ramp_beach) * cliffy;
+
+    // Rock outcrops along the cliff edges: ridged noise in a narrow band
+    // behind the wall gives sharp, craggy shapes that read as bare rock
+    // under a stone texture. Zero in beach sectors and inland, and faded
+    // to zero at the waterline itself so the water's edge stays smooth.
+    let rock_zone =
+        cliffy * smooth01((d / 60.0) as f32) * (1.0 - smooth01(((d - 100.0) / 200.0) as f32));
+    let rock = 12.0 * rock_zone * noise::ridged(s ^ 5, wx / 150.0, wy / 150.0, 4, 2.0, 0.5);
+
+    (interior * ramp + rock).max(0.0)
 }
 
 /// Conservative "this tile is certainly open sea" test for a sample-space

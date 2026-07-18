@@ -6,8 +6,9 @@
 
 use crate::pipeline::config::PipelineConfig;
 
-/// Bump to force a full rebuild after breaking output-format changes.
-const VERSION: u32 = 3;
+/// Bump to force a full rebuild after breaking output-format or
+/// generator changes.
+const VERSION: u32 = 4;
 
 pub struct BuildHashes {
     pub mesh: String,

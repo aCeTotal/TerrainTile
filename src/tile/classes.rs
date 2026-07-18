@@ -12,8 +12,9 @@ use crate::tile::mesh::{normal_at, HeightPatch};
 const BLUR_PASSES: usize = 3;
 
 /// Extra samples around the vertex grid so the blur has real neighbors.
-/// The tile builder guarantees the patch apron is at least this wide —
-/// otherwise the blur would read window-clamped values and break seams.
+/// The tile builder guarantees the patch apron is at least PAD + 1 wide
+/// (the normals read one sample beyond the padded grid) — otherwise the
+/// blur would read window-clamped values and break seams.
 pub const PAD: usize = BLUR_PASSES;
 
 pub struct TileClasses {

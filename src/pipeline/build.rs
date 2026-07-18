@@ -65,8 +65,9 @@ pub fn build_tile(
     let need_masks = old.as_ref().is_none_or(|m| m.masks_hash != masks_hash);
 
     let n = grid.tile_px;
-    // The compositor's blur needs at least PAD real neighbor samples.
-    let apron = (1usize << (cfg.world.lods - 1)).max(classes::PAD);
+    // The compositor's blur needs PAD real neighbor samples, and its
+    // normals read one sample beyond the padded grid → PAD + 1.
+    let apron = (1usize << (cfg.world.lods - 1)).max(classes::PAD + 1);
     let size = n + 2 * apron + 1;
     let (opx, opy) = grid.origin_px(t);
 

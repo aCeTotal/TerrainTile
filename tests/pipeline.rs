@@ -89,13 +89,13 @@ fn full_generation_no_cracks() {
     assert!(land.join("class_2.png").exists(), "gress-klassen skal finnes midt på øya");
     assert!(out.join("quadtree.json").exists());
 
-    // Florida island: land above sea, nothing alpine, most tiles flat sea.
+    // Varied island: real relief above sea, bounded, most tiles flat sea.
     let ds: serde_json::Value =
         serde_json::from_slice(&std::fs::read(out.join("dataset.json")).unwrap()).unwrap();
     assert_eq!(ds["tiles_x"], 28);
     assert_eq!(ds["min_height"].as_f64().unwrap(), 0.0);
     let max = ds["max_height"].as_f64().unwrap();
-    assert!(max > 5.0 && max <= 60.0, "øyhøyde utenfor Florida-området: {max}");
+    assert!(max > 15.0 && max <= 350.0, "øyhøyde utenfor forventet område: {max}");
     let flat_count = ds["flat_count"].as_u64().unwrap();
     assert!(flat_count > 400, "de fleste fliser skal være flatt hav: {flat_count}");
 
